@@ -76,9 +76,6 @@ tool_handlers: dict[str, ToolHandler] = {}
 # Global database connection pool
 db_pool: DbConnPool | None = None
 
-# Flag to track if tools are registered
-tools_registered: bool = False
-
 
 def add_tool_handler(tool_handler: ToolHandler) -> None:
     """
@@ -119,30 +116,6 @@ def get_db_pool() -> DbConnPool:
     if db_pool is None:
         raise RuntimeError("Database connection pool not initialized")
     return db_pool
-
-
-async def ensuretools_registered() -> None:
-    """
-    Ensure tools are registered, initializing database connection if needed.
-    This provides lazy initialization to avoid blocking server startup.
-    """
-    global tools_registered, db_pool
-    database_url = os.environ.get("DATABASE_URI")
-    if tools_registered:
-        return
-
-    if not database_url:
-        raise RuntimeError("Database URL not configured. Set DATABASE_URI environment variable.")
-
-    # Initialize database connection pool lazily
-    if db_pool is None:
-        db_pool = DbConnPool(database_url)
-        await db_pool.connect()
-        logger.info("Database connection pool initialized (lazy)")
-
-    # Register all tools
-    register_all_tools()
-    tools_registered = True
 
 
 def register_all_tools() -> None:
@@ -285,9 +258,6 @@ async def list_tools() -> list[Tool]:
         List of Tool objects describing all registered tools
     """
     try:
-        # Ensure tools are registered (lazy initialization)
-        await ensuretools_registered()
-
         tools = [handler.get_tool_definition() for handler in tool_handlers.values()]
         logger.info(f"Listed {len(tools)} available tools")
         return tools
@@ -312,9 +282,6 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
         RuntimeError: If the tool execution fails
     """
     try:
-        # Ensure tools are registered (lazy initialization)
-        await ensuretools_registered()
-
         # Validate arguments
         if not isinstance(arguments, dict):
             raise RuntimeError("Arguments must be a dictionary")
@@ -344,6 +311,19 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
                 text=f"Error executing tool '{name}': {str(e)}"
             )
         ]
+
+
+async def initialize_db_pool(database_uri: str) -> None:
+    """
+    Initialize the database connection pool.
+
+    Args:
+        database_uri: PostgreSQL connection URI
+    """
+    global db_pool
+    db_pool = DbConnPool(database_uri)
+    await db_pool.connect()
+    logger.info("Database connection pool initialized successfully")
 
 
 async def cleanup_db_pool() -> None:
@@ -410,12 +390,25 @@ async def main():
         logger.setLevel(logging.DEBUG)
 
     try:
+        # Get database URL from environment variable or command line
+        database_url = args.database_url or os.environ.get("DATABASE_URI")
+
+        if not database_url:
+            logger.error("No database URL provided. Set DATABASE_URI environment variable or use --database-url")
+            print("Error: No database URL provided. Set DATABASE_URI environment variable or use --database-url",
+                  file=sys.stderr)
+            sys.exit(1)
 
 
-        logger.info("Database URL configured (connection will be established on first use)")
+        # Initialize database connection pool
+        await initialize_db_pool(database_url)
+
+        # Register all tools
+        register_all_tools()
 
         logger.info(f"Starting pgtuner_mcp server in {args.mode} mode...")
         logger.info(f"Python version: {sys.version}")
+        logger.info(f"Registered tools: {list(tool_handlers.keys())}")
 
         # Run the server in the specified mode
         await run_server(args.mode, args.host, port, args.debug, args.stateless)
