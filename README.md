@@ -1,8 +1,8 @@
 # PostgreSQL performance tuning MCP
 
 [![smithery badge](https://smithery.ai/badge/@isdaniel/pgtuner_mcp)](https://smithery.ai/server/@isdaniel/pgtuner_mcp)
-![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)
-![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)
+[![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 
 
 <a href="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp">
@@ -44,6 +44,12 @@ When the HypoPG extension is available, the server can:
 
 ```bash
 pip install pgtuner_mcp
+```
+
+Or using `uv`:
+
+```bash
+uv pip install pgtuner_mcp
 ```
 
 ### Manual Installation
