@@ -1,6 +1,9 @@
-# pgtuner_mcp
+# PostgreSQL performance tuning MCP
 
 [![smithery badge](https://smithery.ai/badge/@isdaniel/pgtuner_mcp)](https://smithery.ai/server/@isdaniel/pgtuner_mcp)
+![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)
+
 
 <a href="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp/badge" />
