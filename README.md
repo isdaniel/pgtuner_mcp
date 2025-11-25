@@ -1,5 +1,7 @@
 # pgtuner_mcp
 
+[![smithery badge](https://smithery.ai/badge/@isdaniel/pgtuner_mcp)](https://smithery.ai/server/@isdaniel/pgtuner_mcp)
+
 A Model Context Protocol (MCP) server that provides AI-powered PostgreSQL performance tuning capabilities. This server helps identify slow queries, recommend optimal indexes, analyze execution plans, and leverage HypoPG for hypothetical index testing.
 
 ## Features
