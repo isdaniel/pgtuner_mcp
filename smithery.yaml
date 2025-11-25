@@ -1,7 +1,7 @@
 runtime: container
 
 startCommand:
-  type: stdio
+  type: http
   configSchema:
     type: object
     required:
@@ -18,8 +18,6 @@ startCommand:
         default: false
   commandFunction: |
     (config) => ({
-      command: "python",
-      args: ["-m", "pgtuner_mcp", "--mode", "stdio"],
       env: {
         DATABASE_URI: config.database_uri,
         DEBUG: config.debug ? "true" : "false"
@@ -27,5 +25,5 @@ startCommand:
     })
 
 build:
-  dockerfile: "Dockerfile"
+  dockerfile: "Dockerfile.streamable-http"
   dockerBuildPath: "."
