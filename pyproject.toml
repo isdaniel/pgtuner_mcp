@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pgtuner_mcp"
+version = "0.1.0"
+authors = [
+  { name = "DanielShih", email = "dog830228@gmail.com" },
+]
+description = "An MCP server for PostgreSQL AI-powered performance tuning with HypoPG support"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "mcp[cli]>=1.12.0",
+  "argparse>=1.4.0",
+  "psycopg[pool]>=3.1.0",
+  "pglast>=6.0",
+  "python-dotenv>=1.0.1",
+  "humanize>=4.0.0",
+]
+
+[project.optional-dependencies]
+sse = [
+  "starlette>=0.27.0",
+  "uvicorn>=0.23.0",
+]
+dev = [
+  "pytest>=7.0.0",
+  "pytest-asyncio>=0.21.0",
+  "pytest-cov>=4.0.0",
+  "ruff>=0.1.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pgtuner_mcp"]
+
+[project.scripts]
+pgtuner_mcp = "pgtuner_mcp:main"
+
+[project.urls]
+Source = "https://github.com/example/pgtuner_mcp"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "UP", "B", "C4"]
+ignore = ["E501"]
