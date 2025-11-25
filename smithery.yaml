@@ -1,0 +1,29 @@
+runtime: container
+
+startCommand:
+  type: http
+  configSchema:
+    type: object
+    required:
+      - database_uri
+    properties:
+      database_uri:
+        type: string
+        title: "Database URI"
+        description: "PostgreSQL connection string (e.g., postgresql://user:password@host:port/database)"
+      debug:
+        type: boolean
+        title: "Debug Mode"
+        description: "Enable debug logging"
+        default: false
+  commandFunction: |
+    (config) => ({
+      env: {
+        DATABASE_URI: config.database_uri,
+        DEBUG: config.debug ? "true" : "false"
+      }
+    })
+
+build:
+  dockerfile: "Dockerfile.streamable-http"
+  dockerBuildPath: "."

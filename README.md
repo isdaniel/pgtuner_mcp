@@ -253,37 +253,6 @@ docker run \
 - `pg_stat_statements` extension (for query analysis)
 - `hypopg` extension (optional, for hypothetical index testing)
 
-## Architecture
-
-```
-pgtuner_mcp/
-├── src/
-│   └── pgtuner_mcp/
-│       ├── __init__.py
-│       ├── __main__.py
-│       ├── server.py           # Main MCP server
-│       ├── tools/
-│       │   ├── __init__.py
-│       │   ├── toolhandler.py  # Base tool handler
-│       │   ├── tools_explain.py    # EXPLAIN tools
-│       │   ├── tools_index.py      # Index tuning tools
-│       │   ├── tools_health.py     # Database health tools
-│       │   └── tools_query.py      # Query analysis tools
-│       ├── services/
-│       │   ├── __init__.py
-│       │   ├── sql_driver.py       # PostgreSQL connection
-│       │   ├── hypopg_service.py   # HypoPG integration
-│       │   └── index_advisor.py    # Index recommendation engine
-│       └── utils/
-│           ├── __init__.py
-│           └── extension_utils.py  # Extension checking
-├── tests/
-├── Dockerfile
-├── pyproject.toml
-├── requirements.txt
-└── README.md
-```
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

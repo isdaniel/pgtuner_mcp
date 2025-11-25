@@ -3,18 +3,19 @@ pgtuner-mcp: PostgreSQL MCP Performance Tuning Server
 
 This server implements a modular, extensible design pattern for PostgreSQL
 performance tuning with HypoPG support for hypothetical index testing.
-Supports both stdio and SSE MCP server modes.
+Supports stdio, SSE, and streamable-http MCP server modes.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import logging
 import os
 import sys
 import traceback
-from collections.abc import Sequence
+from collections.abc import AsyncIterator, Sequence
 from typing import Any
 
 from mcp.server import Server
@@ -25,16 +26,18 @@ from mcp.types import (
     Tool,
 )
 
-# SSE-related imports (imported conditionally)
+# HTTP-related imports (imported conditionally)
 try:
     import uvicorn
     from mcp.server.sse import SseServerTransport
+    from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
     from starlette.applications import Starlette
+    from starlette.middleware.cors import CORSMiddleware
     from starlette.requests import Request
     from starlette.routing import Mount, Route
-    SSE_AVAILABLE = True
+    HTTP_AVAILABLE = True
 except ImportError:
-    SSE_AVAILABLE = False
+    HTTP_AVAILABLE = False
 
 # Import tool handlers
 from .services import DbConnPool, HypoPGService, IndexAdvisor, SqlDriver
@@ -158,8 +161,8 @@ def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlett
     Returns:
         Starlette application instance
     """
-    if not SSE_AVAILABLE:
-        raise RuntimeError("SSE dependencies not available. Install with: pip install starlette uvicorn")
+    if not HTTP_AVAILABLE:
+        raise RuntimeError("HTTP dependencies not available. Install with: pip install starlette uvicorn")
 
     sse = SseServerTransport("/messages/")
 
@@ -182,6 +185,68 @@ def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlett
             Mount("/messages/", app=sse.handle_post_message),
         ],
     )
+
+
+def create_streamable_http_app(mcp_server: Server, *, debug: bool = False, stateless: bool = False) -> Starlette:
+    """
+    Create a Starlette application with StreamableHTTPSessionManager.
+    Implements the MCP Streamable HTTP protocol with a single /mcp endpoint.
+
+    Args:
+        mcp_server: The MCP server instance
+        debug: Whether to enable debug mode
+        stateless: If True, creates a fresh transport for each request with no session tracking
+
+    Returns:
+        Starlette application instance
+    """
+    if not HTTP_AVAILABLE:
+        raise RuntimeError("HTTP dependencies not available. Install with: pip install starlette uvicorn")
+
+    # Create the session manager
+    session_manager = StreamableHTTPSessionManager(
+        app=mcp_server,
+        event_store=None,  # No event store for now (no resumability)
+        json_response=False,
+        stateless=stateless,
+    )
+
+    class StreamableHTTPRoute:
+        """ASGI app wrapper for the streamable HTTP handler"""
+        async def __call__(self, scope, receive, send):
+            await session_manager.handle_request(scope, receive, send)
+
+    @contextlib.asynccontextmanager
+    async def lifespan(app: Starlette) -> AsyncIterator[None]:
+        """Context manager for session manager lifecycle."""
+        async with session_manager.run():
+            logger.info("Streamable HTTP session manager started!")
+            try:
+                yield
+            finally:
+                logger.info("Streamable HTTP session manager shutting down...")
+
+    # Create Starlette app with a single endpoint
+    starlette_app = Starlette(
+        debug=debug,
+        routes=[
+            Route("/mcp", endpoint=StreamableHTTPRoute()),
+        ],
+        lifespan=lifespan,
+    )
+
+    # Add CORS middleware
+    starlette_app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["*"],
+        expose_headers=["mcp-session-id", "mcp-protocol-version"],
+        max_age=86400,
+    )
+
+    return starlette_app
 
 
 @app.list_tools()
@@ -279,24 +344,29 @@ async def main():
     """
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description='pgtuner_mcp: PostgreSQL MCP Performance Tuning Server - supports stdio and SSE modes'
+        description='pgtuner_mcp: PostgreSQL MCP Performance Tuning Server - supports stdio, SSE, and streamable-http modes'
     )
     parser.add_argument(
         '--mode',
-        choices=['stdio', 'sse'],
+        choices=['stdio', 'sse', 'streamable-http'],
         default='stdio',
-        help='Server mode: stdio (default) or sse'
+        help='Server mode: stdio (default), sse, or streamable-http'
     )
     parser.add_argument(
         '--host',
         default='0.0.0.0',
-        help='Host to bind to (SSE mode only, default: 0.0.0.0)'
+        help='Host to bind to (HTTP modes only, default: 0.0.0.0)'
     )
     parser.add_argument(
         '--port',
         type=int,
-        default=8080,
-        help='Port to listen on (SSE mode only, default: 8080)'
+        default=None,
+        help='Port to listen on (HTTP modes only, default: from PORT env var or 8080)'
+    )
+    parser.add_argument(
+        '--stateless',
+        action='store_true',
+        help='Run in stateless mode (streamable-http only, creates fresh transport per request)'
     )
     parser.add_argument(
         '--debug',
@@ -310,6 +380,9 @@ async def main():
     )
 
     args = parser.parse_args()
+
+    # Get port from environment variable or command line argument, or default to 8080
+    port = args.port if args.port is not None else int(os.environ.get("PORT", 8080))
 
     # Set debug logging if requested
     if args.debug:
@@ -338,7 +411,7 @@ async def main():
         logger.info(f"Registered tools: {list(tool_handlers.keys())}")
 
         # Run the server in the specified mode
-        await run_server(args.mode, args.host, args.port, args.debug)
+        await run_server(args.mode, args.host, port, args.debug, args.stateless)
 
     except Exception as e:
         logger.exception(f"Failed to start server: {str(e)}")
@@ -347,15 +420,16 @@ async def main():
         await cleanup_db_pool()
 
 
-async def run_server(mode: str, host: str = "0.0.0.0", port: int = 8080, debug: bool = False):
+async def run_server(mode: str, host: str = "0.0.0.0", port: int = 8080, debug: bool = False, stateless: bool = False):
     """
-    Unified server runner that supports both stdio and SSE modes.
+    Unified server runner that supports stdio, SSE, and streamable-http modes.
 
     Args:
-        mode: Server mode ("stdio" or "sse")
-        host: Host to bind to (SSE mode only)
-        port: Port to listen on (SSE mode only)
+        mode: Server mode ("stdio", "sse", or "streamable-http")
+        host: Host to bind to (HTTP modes only)
+        port: Port to listen on (HTTP modes only)
         debug: Whether to enable debug mode
+        stateless: Whether to use stateless mode (streamable-http only)
     """
     if mode == "stdio":
         logger.info("Starting stdio server...")
@@ -370,13 +444,14 @@ async def run_server(mode: str, host: str = "0.0.0.0", port: int = 8080, debug: 
             )
 
     elif mode == "sse":
-        if not SSE_AVAILABLE:
+        if not HTTP_AVAILABLE:
             raise RuntimeError(
                 "SSE mode requires additional dependencies. "
                 "Install with: pip install starlette uvicorn"
             )
 
         logger.info(f"Starting SSE server on {host}:{port}...")
+        logger.info(f"Endpoints: http://{host}:{port}/sse, http://{host}:{port}/messages/")
 
         # Create Starlette app with SSE transport
         starlette_app = create_starlette_app(app, debug=debug)
@@ -390,6 +465,32 @@ async def run_server(mode: str, host: str = "0.0.0.0", port: int = 8080, debug: 
         )
 
         # Run the server
+        server = uvicorn.Server(config)
+        await server.serve()
+
+    elif mode == "streamable-http":
+        if not HTTP_AVAILABLE:
+            raise RuntimeError(
+                "Streamable HTTP mode requires additional dependencies. "
+                "Install with: pip install starlette uvicorn"
+            )
+
+        mode_desc = "stateless" if stateless else "stateful"
+        logger.info(f"Starting Streamable HTTP server ({mode_desc}) on {host}:{port}...")
+        logger.info(f"Endpoint: http://{host}:{port}/mcp")
+
+        # Create Starlette app with Streamable HTTP transport
+        starlette_app = create_streamable_http_app(app, debug=debug, stateless=stateless)
+
+        # Configure uvicorn
+        config = uvicorn.Config(
+            app=starlette_app,
+            host=host,
+            port=port,
+            log_level="debug" if debug else "info"
+        )
+
+        # Run the server (session manager lifecycle is handled by lifespan)
         server = uvicorn.Server(config)
         await server.serve()
 
