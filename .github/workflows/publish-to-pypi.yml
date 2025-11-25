@@ -30,7 +30,7 @@ jobs:
 
     - name: Extract version from pyproject.toml
       run: |
-        VERSION=$(grep -oP '(?<=version = ").*(?=")' pyproject.toml)
+        VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -1)
         echo "VERSION=$VERSION" >> $GITHUB_ENV
 
     - name: Check if version exists on PyPI
