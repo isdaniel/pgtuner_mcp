@@ -1,0 +1,6 @@
+src/pgtuner_mcp.egg-info/*
+__pycache__/
+*.pyc
+venv/
+.pytest_cache/
+node_modules

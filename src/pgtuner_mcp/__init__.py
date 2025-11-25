@@ -5,6 +5,7 @@ A Model Context Protocol (MCP) server for AI-powered PostgreSQL performance tuni
 """
 
 from .server import main
+from .__main__ import run
 
 __version__ = "0.1.0"
-__all__ = ["main"]
+__all__ = ["main", "run"]

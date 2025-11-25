@@ -2,8 +2,6 @@
 
 A Model Context Protocol (MCP) server that provides AI-powered PostgreSQL performance tuning capabilities. This server helps identify slow queries, recommend optimal indexes, analyze execution plans, and leverage HypoPG for hypothetical index testing.
 
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-
 ## Features
 
 ### Query Analysis
@@ -123,12 +121,6 @@ python -m pgtuner_mcp --mode streamable-http --debug
 
 **Endpoint:** `http://{host}:{port}/mcp`
 
-**CORS Support:** The streamable-http mode includes CORS middleware with:
-- All origins allowed
-- Credentials enabled
-- GET, POST, OPTIONS methods
-- Exposes `mcp-session-id` and `mcp-protocol-version` headers
-
 ## Available Tools
 
 ### Query Analysis Tools
@@ -176,51 +168,9 @@ python -m pgtuner_mcp --mode streamable-http --debug
 
 ## HypoPG Extension
 
-### What is HypoPG?
-
-HypoPG is a PostgreSQL extension that enables creating **hypothetical indexes**. These are virtual indexes that:
-- Don't consume disk space or CPU to create
-- Allow testing index effectiveness without actual creation
-- Work with `EXPLAIN` to show how PostgreSQL would use them
-- Don't affect `EXPLAIN ANALYZE` (actual execution)
-
-### Installing HypoPG
-
-#### Debian/Ubuntu
-```bash
-sudo apt-get install postgresql-XX-hypopg  # Replace XX with your PG version
-```
-
-#### RHEL/CentOS
-```bash
-sudo yum install postgresqlXX-hypopg
-```
-
-#### MacOS with Homebrew
-```bash
-brew install hypopg
-```
-
 #### Enable in Database
 ```sql
 CREATE EXTENSION hypopg;
-```
-
-### Using Hypothetical Indexes
-
-```python
-# Test if an index would help
-result = await test_hypothetical_index(
-    table="users",
-    columns=["email"],
-    query="SELECT * FROM users WHERE email = 'test@example.com'"
-)
-
-# View created hypothetical indexes
-indexes = await list_hypothetical_indexes()
-
-# Clean up
-await reset_hypothetical_indexes()
 ```
 
 ## Example Usage
@@ -298,7 +248,7 @@ docker run \
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.10+
 - PostgreSQL 12+ (recommended: 14+)
 - `pg_stat_statements` extension (for query analysis)
 - `hypopg` extension (optional, for hypothetical index testing)
