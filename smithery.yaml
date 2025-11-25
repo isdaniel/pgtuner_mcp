@@ -1,5 +1,6 @@
+runtime: container
 startCommand:
-  type: stdio
+  type: http
   configSchema:
     type: object
     required:
@@ -9,21 +10,6 @@ startCommand:
         type: string
         title: "Database URI"
         description: "PostgreSQL connection string (e.g., postgresql://user:password@host:port/database)"
-      debug:
-        type: boolean
-        title: "Debug Mode"
-        description: "Enable debug logging"
-        default: false
-  commandFunction: |
-    (config) => ({
-      command: "python",
-      args: ["-m", "pgtuner_mcp", "--mode", "stdio"],
-      env: {
-        DATABASE_URI: config.database_uri,
-        DEBUG: config.debug ? "true" : "false"
-      }
-    })
-
 build:
-  dockerfile: "Dockerfile"
+  dockerfile: "Dockerfile.streamable-http"
   dockerBuildPath: "."
