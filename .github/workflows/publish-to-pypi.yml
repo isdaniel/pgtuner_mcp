@@ -1,0 +1,51 @@
+name: Publish to PyPI
+
+on:
+  push:
+    branches:
+      - main  # Trigger on pushes to the main branch (adjust as needed)
+    tags:
+      - "v*" # or trigger when create new tag with "v" prefix
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.x'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install build
+
+    - name: Build package
+      run: python -m build
+
+    - name: Extract version from pyproject.toml
+      run: |
+        VERSION=$(grep -oP '(?<=version = ").*(?=")' pyproject.toml)
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Check if version exists on PyPI
+      id: check_version
+      run: |
+        PACKAGE_NAME="pgtuner_mcp"
+        if curl -sSf "https://pypi.org/pypi/${PACKAGE_NAME}/${VERSION}/json" > /dev/null; then
+          echo "Version ${VERSION} already exists on PyPI. Skipping publish."
+          echo "skip_publish=true" >> $GITHUB_ENV
+        else
+          echo "skip_publish=false" >> $GITHUB_ENV
+        fi
+
+    - name: Publish to PyPI
+      if: env.skip_publish != 'true'
+      uses: pypa/gh-action-pypi-publish@release/v1
+      with:
+        password: ${{ secrets.PYPI_API_TOKEN }}

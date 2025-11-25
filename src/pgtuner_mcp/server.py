@@ -20,6 +20,8 @@ from typing import Any
 
 from mcp.server import Server
 from mcp.types import (
+    CompleteResult,
+    Completion,
     EmbeddedResource,
     ImageContent,
     TextContent,
@@ -311,6 +313,32 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
                 text=f"Error executing tool '{name}': {str(e)}"
             )
         ]
+
+
+@app.completion()
+async def handle_completion(ref: Any, argument: Any) -> CompleteResult:
+    """
+    Handle completion requests for prompts and resources.
+
+    This server does not provide completion suggestions for any arguments,
+    but implements this handler to satisfy the MCP protocol requirements
+    for servers that need to work with proxies like mcp-proxy.
+
+    Args:
+        ref: Reference to the prompt or resource being completed
+        argument: The argument being completed
+
+    Returns:
+        Empty completion result
+    """
+    logger.debug(f"Completion requested for ref: {ref}, argument: {argument}")
+    return CompleteResult(
+        completion=Completion(
+            values=[],
+            total=0,
+            hasMore=False
+        )
+    )
 
 
 async def initialize_db_pool(database_uri: str) -> None:
