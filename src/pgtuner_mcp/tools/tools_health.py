@@ -16,6 +16,11 @@ class DatabaseHealthToolHandler(ToolHandler):
     """Tool handler for overall database health assessment."""
 
     name = "check_database_health"
+    title = "PostgreSQL Health Check"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Perform a comprehensive database health check.
 
 Analyzes multiple aspects of PostgreSQL health:
@@ -52,7 +57,8 @@ Returns a health score with detailed breakdown and recommendations."""
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -402,6 +408,11 @@ class ActiveQueriesToolHandler(ToolHandler):
     """Tool handler for viewing active queries and connections."""
 
     name = "get_active_queries"
+    title = "Active Queries Monitor"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Get information about currently active queries and connections.
 
 Shows:
@@ -447,7 +458,8 @@ Useful for:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -562,6 +574,11 @@ class WaitEventsToolHandler(ToolHandler):
     """Tool handler for analyzing wait events."""
 
     name = "analyze_wait_events"
+    title = "Wait Events Analyzer"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Analyze PostgreSQL wait events to identify bottlenecks.
 
 Wait events indicate what processes are waiting for:
@@ -593,7 +610,8 @@ This helps identify:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -677,6 +695,11 @@ class DatabaseSettingsToolHandler(ToolHandler):
     """Tool handler for reviewing and recommending database settings."""
 
     name = "review_settings"
+    title = "Configuration Settings Reviewer"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Review PostgreSQL configuration settings and get recommendations.
 
 Analyzes key performance-related settings:
@@ -711,7 +734,8 @@ Compares against best practices and system resources."""
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:

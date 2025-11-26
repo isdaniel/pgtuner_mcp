@@ -16,6 +16,11 @@ class IndexAdvisorToolHandler(ToolHandler):
     """Tool handler for AI-powered index recommendations."""
 
     name = "get_index_recommendations"
+    title = "Index Recommendation Engine"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Get AI-powered index recommendations for your database.
 
 Analyzes your query workload (from pg_stat_statements) and recommends indexes
@@ -72,7 +77,8 @@ The recommendations consider:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -154,6 +160,11 @@ class ExplainQueryToolHandler(ToolHandler):
     """Tool handler for EXPLAIN with hypothetical index testing."""
 
     name = "explain_with_indexes"
+    title = "Query Plan Analyzer"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Run EXPLAIN on a query, optionally with hypothetical indexes.
 
 This tool allows you to see how a query would perform with proposed indexes
@@ -216,7 +227,8 @@ Returns both the original and hypothetical execution plans for comparison."""
                     }
                 },
                 "required": ["query"]
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -350,6 +362,11 @@ class HypoPGToolHandler(ToolHandler):
     """Tool handler for direct HypoPG hypothetical index management."""
 
     name = "manage_hypothetical_indexes"
+    title = "Hypothetical Index Manager"
+    read_only_hint = False  # Can create/drop hypothetical indexes
+    destructive_hint = False  # Hypothetical indexes don't affect real data
+    idempotent_hint = False  # Creating indexes multiple times creates multiple
+    open_world_hint = False
     description = """Manage HypoPG hypothetical indexes for testing.
 
 HypoPG allows you to create "hypothetical" indexes that exist only in memory
@@ -408,7 +425,8 @@ This is useful for:
                     }
                 },
                 "required": ["action"]
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -490,6 +508,11 @@ class UnusedIndexesToolHandler(ToolHandler):
     """Tool handler for identifying unused or duplicate indexes."""
 
     name = "find_unused_indexes"
+    title = "Unused Index Finder"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Find indexes that are not being used or are duplicates.
 
 Identifies:
@@ -534,7 +557,8 @@ Removing unused indexes can:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:

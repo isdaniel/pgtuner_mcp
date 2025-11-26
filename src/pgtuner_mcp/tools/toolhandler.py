@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Sequence
 from typing import Any
 
-from mcp.types import TextContent, Tool
+from mcp.types import TextContent, Tool, ToolAnnotations
 
 
 class ToolHandler(ABC):
@@ -22,10 +22,19 @@ class ToolHandler(ABC):
         - get_tool_definition(): Returns the Tool schema
         - run_tool(): Executes the tool logic
 
+    Optional attributes for MCP Tool Annotations:
+        - title: Human-readable title for UI display
+        - read_only_hint: If True, tool doesn't modify environment (default: True for most query tools)
+        - destructive_hint: If True, tool may perform destructive updates
+        - idempotent_hint: If True, calling multiple times with same args has same effect
+        - open_world_hint: If True, tool interacts with external entities
+
     Example:
         class MyToolHandler(ToolHandler):
             name = "my_tool"
             description = "Does something useful"
+            title = "My Useful Tool"
+            read_only_hint = True
 
             def get_tool_definition(self) -> Tool:
                 return Tool(
@@ -37,7 +46,8 @@ class ToolHandler(ABC):
                             "param": {"type": "string", "description": "A parameter"}
                         },
                         "required": ["param"]
-                    }
+                    },
+                    annotations=self.get_annotations()
                 )
 
             async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -47,6 +57,39 @@ class ToolHandler(ABC):
 
     name: str = ""
     description: str = ""
+    # MCP Tool Annotation hints
+    title: str | None = None
+    read_only_hint: bool | None = None
+    destructive_hint: bool | None = None
+    idempotent_hint: bool | None = None
+    open_world_hint: bool | None = None
+
+    def get_annotations(self) -> ToolAnnotations | None:
+        """
+        Build ToolAnnotations from the handler's hint attributes.
+
+        Returns:
+            ToolAnnotations object or None if no annotations are set
+        """
+        # Only include annotations if at least one hint is set
+        if all(
+            v is None for v in [
+                self.title,
+                self.read_only_hint,
+                self.destructive_hint,
+                self.idempotent_hint,
+                self.open_world_hint
+            ]
+        ):
+            return None
+
+        return ToolAnnotations(
+            title=self.title,
+            readOnlyHint=self.read_only_hint,
+            destructiveHint=self.destructive_hint,
+            idempotentHint=self.idempotent_hint,
+            openWorldHint=self.open_world_hint
+        )
 
     @abstractmethod
     def get_tool_definition(self) -> Tool:

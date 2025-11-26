@@ -16,6 +16,11 @@ class GetSlowQueriesToolHandler(ToolHandler):
     """Tool handler for retrieving slow queries from pg_stat_statements."""
 
     name = "get_slow_queries"
+    title = "Slow Query Analyzer"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Retrieve slow queries from PostgreSQL using pg_stat_statements.
 
 Returns the top N slowest queries ordered by total execution time.
@@ -65,7 +70,8 @@ The results include:
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -166,6 +172,11 @@ class AnalyzeQueryToolHandler(ToolHandler):
     """Tool handler for analyzing a query's execution plan and performance."""
 
     name = "analyze_query"
+    title = "Query Execution Analyzer"
+    read_only_hint = False  # EXPLAIN ANALYZE actually executes the query
+    destructive_hint = False  # Read queries are safe, but DML could be destructive
+    idempotent_hint = True
+    open_world_hint = False
     description = """Analyze a SQL query's execution plan and performance characteristics.
 
 Uses EXPLAIN ANALYZE to execute the query and capture detailed timing information.
@@ -220,7 +231,8 @@ but be careful with INSERT/UPDATE/DELETE - use analyze_only=false for those."""
                     }
                 },
                 "required": ["query"]
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
@@ -389,6 +401,11 @@ class TableStatsToolHandler(ToolHandler):
     """Tool handler for retrieving table statistics and health metrics."""
 
     name = "get_table_stats"
+    title = "Table Statistics Analyzer"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
     description = """Get detailed statistics for database tables.
 
 Returns information about:
@@ -433,7 +450,8 @@ or have performance issues."""
                     }
                 },
                 "required": []
-            }
+            },
+            annotations=self.get_annotations()
         )
 
     async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:

@@ -1,8 +1,8 @@
-# PostgreSQL performance tuning MCP
+# PostgreSQL Performance Tuning MCP
 
 [![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
-
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 
 <a href="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp/badge" />
@@ -13,29 +13,36 @@ A Model Context Protocol (MCP) server that provides AI-powered PostgreSQL perfor
 ## Features
 
 ### Query Analysis
-- Get top resource-consuming queries from `pg_stat_statements`
+- Retrieve slow queries from `pg_stat_statements` with detailed statistics
 - Analyze query execution plans with `EXPLAIN` and `EXPLAIN ANALYZE`
-- Identify slow queries and bottlenecks
+- Identify performance bottlenecks with automated plan analysis
+- Monitor active queries and detect long-running transactions
 
 ### Index Tuning
-- Smart index recommendations based on query workload
-- Hypothetical index testing with **HypoPG** extension
-- Index health analysis (duplicate, unused, bloated indexes)
-- Estimate index size before creation
+- AI-powered index recommendations based on query workload analysis
+- Hypothetical index testing with **HypoPG** extension (no disk usage)
+- Find unused and duplicate indexes for cleanup
+- Estimate index sizes before creation
+- Test query plans with proposed indexes before implementing
 
 ### Database Health
+- Comprehensive health scoring with multiple checks
 - Connection utilization monitoring
-- Vacuum health and transaction ID wraparound checks
+- Cache hit ratio analysis (buffer and index)
+- Lock contention detection
+- Vacuum health and transaction ID wraparound monitoring
 - Replication lag monitoring
-- Buffer cache hit rate analysis
-- Sequence limit warnings
+- Background writer and checkpoint analysis
 
-### HypoPG Integration
-When the HypoPG extension is available, the server can:
-- Create hypothetical indexes without actual disk usage
-- Test how PostgreSQL would use potential indexes
-- Compare query plans with and without proposed indexes
-- Hide existing indexes to test removal impact
+### Configuration Analysis
+- Review PostgreSQL settings by category
+- Get recommendations for memory, checkpoint, WAL, autovacuum, and connection settings
+- Identify suboptimal configurations
+
+### MCP Prompts & Resources
+- Pre-defined prompt templates for common tuning workflows
+- Dynamic resources for table stats, index info, and health checks
+- Comprehensive documentation resources
 
 ## Installation
 
@@ -54,7 +61,7 @@ uv pip install pgtuner_mcp
 ### Manual Installation
 
 ```bash
-git clone https://github.com/example/pgtuner_mcp.git
+git clone https://github.com/isdaniel/pgtuner_mcp.git
 cd pgtuner_mcp
 pip install -e .
 ```
@@ -63,12 +70,16 @@ pip install -e .
 
 ### Environment Variables
 
-- `DATABASE_URI`: PostgreSQL connection string (required)
-  - Format: `postgresql://user:password@host:port/database`
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `DATABASE_URI` | PostgreSQL connection string | Yes |
+| `PORT` | HTTP server port (default: 8080) | No |
+
+**Connection String Format:** `postgresql://user:password@host:port/database`
 
 ### MCP Client Configuration
 
-Add to your `cline_mcp_settings.json`:
+Add to your `cline_mcp_settings.json` or Claude Desktop config:
 
 ```json
 {
@@ -137,95 +148,215 @@ python -m pgtuner_mcp --mode streamable-http --debug
 
 ## Available Tools
 
-### Query Analysis Tools
+### Performance Analysis Tools
 
-1. **`get_top_queries`** - Get the slowest or most resource-intensive queries
-   - Parameters: `sort_by` (total_time, mean_time, resources), `limit`
-
-2. **`explain_query`** - Explain the execution plan for a SQL query
-   - Parameters: `sql`, `analyze` (boolean), `hypothetical_indexes` (optional)
+| Tool | Description |
+|------|-------------|
+| `get_slow_queries` | Retrieve slow queries from pg_stat_statements with detailed stats (total time, mean time, calls, cache hit ratio) |
+| `analyze_query` | Analyze a query's execution plan with EXPLAIN ANALYZE, including automated issue detection |
+| `get_table_stats` | Get detailed table statistics including size, row counts, dead tuples, and access patterns |
 
 ### Index Tuning Tools
 
-3. **`analyze_workload_indexes`** - Analyze frequently executed queries and recommend optimal indexes
-   - Parameters: `max_index_size_mb`, `method` (dta, greedy)
-
-4. **`analyze_query_indexes`** - Analyze specific SQL queries and recommend indexes
-   - Parameters: `queries` (list), `max_index_size_mb`
-
-5. **`get_index_recommendations`** - Get index recommendations for a single query
-   - Parameters: `query`, `max_recommendations`
-
-6. **`test_hypothetical_index`** - Test how a hypothetical index would affect query performance
-   - Parameters: `table`, `columns`, `query`, `using` (btree, hash, etc.)
-
-7. **`list_hypothetical_indexes`** - List all current hypothetical indexes
-
-8. **`reset_hypothetical_indexes`** - Remove all hypothetical indexes
+| Tool | Description |
+|------|-------------|
+| `get_index_recommendations` | AI-powered index recommendations based on query workload analysis |
+| `explain_with_indexes` | Run EXPLAIN with hypothetical indexes to test improvements without creating real indexes |
+| `manage_hypothetical_indexes` | Create, list, drop, or reset HypoPG hypothetical indexes |
+| `find_unused_indexes` | Find unused and duplicate indexes that can be safely dropped |
 
 ### Database Health Tools
 
-9. **`analyze_db_health`** - Comprehensive database health analysis
-   - Parameters: `health_type` (index, connection, vacuum, sequence, replication, buffer, constraint, all)
+| Tool | Description |
+|------|-------------|
+| `check_database_health` | Comprehensive health check with scoring (connections, cache, locks, replication, wraparound, disk, checkpoints) |
+| `get_active_queries` | Monitor active queries, find long-running transactions and blocked queries |
+| `analyze_wait_events` | Analyze wait events to identify I/O, lock, or CPU bottlenecks |
+| `review_settings` | Review PostgreSQL settings by category with optimization recommendations |
 
-10. **`get_index_health`** - Analyze index health (duplicate, unused, bloated)
+### Tool Parameters
 
-### Utility Tools
+#### get_slow_queries
+- `limit`: Maximum queries to return (default: 10)
+- `min_calls`: Minimum call count filter (default: 1)
+- `min_total_time_ms`: Minimum total execution time filter
+- `order_by`: Sort by `total_time`, `mean_time`, `calls`, or `rows`
 
-11. **`execute_sql`** - Execute a SQL query (respects access mode)
-    - Parameters: `sql`
+#### analyze_query
+- `query` (required): SQL query to analyze
+- `analyze`: Execute query with EXPLAIN ANALYZE (default: true)
+- `buffers`: Include buffer statistics (default: true)
+- `format`: Output format - `json`, `text`, `yaml`, `xml`
 
-12. **`list_schemas`** - List all schemas in the database
+#### get_index_recommendations
+- `workload_queries`: Optional list of specific queries to analyze
+- `max_recommendations`: Maximum recommendations (default: 10)
+- `min_improvement_percent`: Minimum improvement threshold (default: 10%)
+- `include_hypothetical_testing`: Test with HypoPG (default: true)
+- `target_tables`: Focus on specific tables
 
-13. **`get_table_info`** - Get detailed information about a table
-    - Parameters: `schema`, `table`
+#### check_database_health
+- `include_recommendations`: Include actionable recommendations (default: true)
+- `verbose`: Include detailed statistics (default: false)
 
-## HypoPG Extension
+## MCP Prompts
 
-#### Enable in Database
+The server includes pre-defined prompt templates for guided tuning sessions:
+
+| Prompt | Description |
+|--------|-------------|
+| `diagnose_slow_queries` | Systematic slow query investigation workflow |
+| `index_optimization` | Comprehensive index analysis and cleanup |
+| `health_check` | Full database health assessment |
+| `query_tuning` | Optimize a specific SQL query |
+| `performance_baseline` | Generate a baseline report for comparison |
+
+## MCP Resources
+
+### Static Resources
+- `pgtuner://docs/tools` - Complete tool documentation
+- `pgtuner://docs/workflows` - Common tuning workflows guide
+- `pgtuner://docs/prompts` - Prompt template documentation
+
+### Dynamic Resource Templates
+- `pgtuner://table/{schema}/{table_name}/stats` - Table statistics
+- `pgtuner://table/{schema}/{table_name}/indexes` - Table index information
+- `pgtuner://query/{query_hash}/stats` - Query performance statistics
+- `pgtuner://settings/{category}` - PostgreSQL settings (memory, checkpoint, wal, autovacuum, connections, all)
+- `pgtuner://health/{check_type}` - Health checks (connections, cache, locks, replication, bloat, all)
+
+## PostgreSQL Extension Setup
+
+### HypoPG Extension
+
+HypoPG enables testing indexes without actually creating them. This is extremely useful for:
+- Testing if a proposed index would be used by the query planner
+- Comparing execution plans with different index strategies
+- Estimating storage requirements before committing
+
+#### Enable HypoPG in Database
+
+HypoPG enables testing hypothetical indexes without creating them on disk.
+
 ```sql
-CREATE EXTENSION hypopg;
+-- Create the extension
+CREATE EXTENSION IF NOT EXISTS hypopg;
+
+-- Verify installation
+SELECT * FROM hypopg_list_indexes();
 ```
+
+### pg_stat_statements Extension
+
+The `pg_stat_statements` extension is **required** for query performance analysis. It tracks planning and execution statistics for all SQL statements executed by a server.
+
+#### Step 1: Enable the Extension in postgresql.conf
+
+Add the following to your `postgresql.conf` file:
+
+```ini
+# Required: Load pg_stat_statements module
+shared_preload_libraries = 'pg_stat_statements'
+
+# Required: Enable query identifier computation
+compute_query_id = on
+
+# Maximum number of statements tracked (default: 5000)
+pg_stat_statements.max = 10000
+
+# Track all statements including nested ones (default: top)
+# Options: top, all, none
+pg_stat_statements.track = top
+
+# Track utility commands like CREATE, ALTER, DROP (default: on)
+pg_stat_statements.track_utility = on
+```
+
+> **Note**: After modifying `shared_preload_libraries`, a PostgreSQL server **restart** is required.
+
+#### Step 2: Create the Extension in Your Database
+
+```sql
+-- Connect to your database and create the extension
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- Verify installation
+SELECT * FROM pg_stat_statements LIMIT 1;
+```
+
+### Performance Impact Considerations
+
+| Setting | Overhead | Recommendation |
+|---------|----------|----------------|
+| `pg_stat_statements` | Low (~1-2%) | **Always enable** |
+| `track_io_timing` | Low-Medium (~2-5%) | Enable in production, test first |
+| `track_functions = all` | Low | Enable for function-heavy workloads |
+| `pg_stat_statements.track_planning` | Medium | Enable only when investigating planning issues |
+| `auto_explain` | Variable | Use cautiously in production |
+| `log_min_duration_statement` | Low | Recommended for slow query identification |
+
+> **Tip**: Use `pg_test_timing` to measure the timing overhead on your specific system before enabling `track_io_timing`.
 
 ## Example Usage
 
-### Find Slow Queries
+### Find and Analyze Slow Queries
 
 ```python
-# Get top 10 resource-consuming queries
-result = await get_top_queries(sort_by="resources", limit=10)
+# Get top 10 slowest queries
+slow_queries = await get_slow_queries(limit=10, order_by="total_time")
+
+# Analyze a specific query's execution plan
+analysis = await analyze_query(
+    query="SELECT * FROM orders WHERE user_id = 123",
+    analyze=True,
+    buffers=True
+)
 ```
 
-### Analyze and Optimize a Query
+### Get Index Recommendations
 
 ```python
-# Get explain plan
-plan = await explain_query(
-    sql="SELECT * FROM orders WHERE user_id = 123 AND status = 'pending'"
+# Analyze workload and get recommendations
+recommendations = await get_index_recommendations(
+    max_recommendations=5,
+    min_improvement_percent=20,
+    include_hypothetical_testing=True
 )
 
-# Get index recommendations
-recommendations = await analyze_query_indexes(
-    queries=["SELECT * FROM orders WHERE user_id = 123 AND status = 'pending'"]
-)
-
-# Test hypothetical index
-test_result = await test_hypothetical_index(
-    table="orders",
-    columns=["user_id", "status"],
-    query="SELECT * FROM orders WHERE user_id = 123 AND status = 'pending'"
-)
+# Recommendations include CREATE INDEX statements
+for rec in recommendations["recommendations"]:
+    print(rec["create_statement"])
 ```
 
 ### Database Health Check
 
 ```python
-# Run all health checks
-health = await analyze_db_health(health_type="all")
+# Run comprehensive health check
+health = await check_database_health(
+    include_recommendations=True,
+    verbose=True
+)
 
-# Check specific areas
-index_health = await analyze_db_health(health_type="index")
-vacuum_health = await analyze_db_health(health_type="vacuum")
+print(f"Health Score: {health['overall_score']}/100")
+print(f"Status: {health['status']}")
+
+# Review specific areas
+for issue in health["issues"]:
+    print(f"{issue}")
+```
+
+### Find Unused Indexes
+
+```python
+# Find indexes that can be dropped
+unused = await find_unused_indexes(
+    schema_name="public",
+    include_duplicates=True
+)
+
+# Get DROP statements
+for stmt in unused["recommendations"]:
+    print(stmt)
 ```
 
 ## Docker
@@ -233,39 +364,55 @@ vacuum_health = await analyze_db_health(health_type="vacuum")
 ### Build
 
 ```bash
+# Standard build
 docker build -t pgtuner_mcp .
+
+# For streamable-http mode
+docker build -f Dockerfile.streamable-http -t pgtuner_mcp:http .
 ```
 
 ### Run
 
 ```bash
-# Streamable HTTP mode (recommended)
+# Streamable HTTP mode (recommended for web applications)
 docker run -p 8080:8080 \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
   pgtuner_mcp --mode streamable-http
 
-# Streamable HTTP stateless mode
+# Streamable HTTP stateless mode (for serverless)
 docker run -p 8080:8080 \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
   pgtuner_mcp --mode streamable-http --stateless
 
-# SSE mode (legacy)
+# SSE mode (legacy web applications)
 docker run -p 8080:8080 \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
   pgtuner_mcp --mode sse
 
-# stdio mode (for MCP clients)
-docker run \
+# stdio mode (for MCP clients like Claude Desktop)
+docker run -i \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
-  pgtuner_mcp
+  pgtuner_mcp --mode stdio
 ```
 
 ## Requirements
 
-- Python 3.10+
-- PostgreSQL 12+ (recommended: 14+)
-- `pg_stat_statements` extension (for query analysis)
-- `hypopg` extension (optional, for hypothetical index testing)
+- **Python**: 3.10+
+- **PostgreSQL**: 12+ (recommended: 14+)
+- **Extensions**:
+  - `pg_stat_statements` (required for query analysis)
+  - `hypopg` (optional, for hypothetical index testing)
+
+## Dependencies
+
+Core dependencies:
+- `mcp[cli]>=1.12.0` - Model Context Protocol SDK
+- `psycopg[binary,pool]>=3.1.0` - PostgreSQL adapter with connection pooling
+- `pglast>=7.10` - PostgreSQL query parser
+
+Optional (for HTTP modes):
+- `starlette>=0.27.0` - ASGI framework
+- `uvicorn>=0.23.0` - ASGI server
 
 ## Contributing
 
