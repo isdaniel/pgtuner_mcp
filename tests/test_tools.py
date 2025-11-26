@@ -166,7 +166,7 @@ class TestHypoPGToolHandler:
         result = await handler.run_tool({"action": "check"})
 
         assert "hypopg_available" in result[0].text
-        mock_hypopg_service.check_hypopg_available.assert_called_once()
+        mock_hypopg_service.check_status.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_action(self, mock_hypopg_service):
@@ -179,7 +179,7 @@ class TestHypoPGToolHandler:
         })
 
         assert "success" in result[0].text.lower() or "index_name" in result[0].text
-        mock_hypopg_service.create_hypothetical_index.assert_called_once()
+        mock_hypopg_service.create_index.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_create_action_missing_args(self, mock_hypopg_service):
@@ -193,15 +193,24 @@ class TestHypoPGToolHandler:
     @pytest.mark.asyncio
     async def test_list_action(self, mock_hypopg_service):
         """Test the list action."""
-        mock_hypopg_service.list_hypothetical_indexes = AsyncMock(return_value=[
-            {"index_name": "hypo_idx_1", "table": "users"}
+        from pgtuner_mcp.services.hypopg_service import HypotheticalIndex
+        mock_hypopg_service.list_indexes = AsyncMock(return_value=[
+            HypotheticalIndex(
+                indexrelid=12345,
+                index_name="hypo_idx_1",
+                table_name="users",
+                schema_name="public",
+                am_name="btree",
+                definition="CREATE INDEX ON public.users USING btree (email)",
+                estimated_size=8192
+            )
         ])
 
         handler = HypoPGToolHandler(mock_hypopg_service)
         result = await handler.run_tool({"action": "list"})
 
         assert "hypothetical_indexes" in result[0].text
-        mock_hypopg_service.list_hypothetical_indexes.assert_called_once()
+        mock_hypopg_service.list_indexes.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_reset_action(self, mock_hypopg_service):
@@ -209,7 +218,7 @@ class TestHypoPGToolHandler:
         handler = HypoPGToolHandler(mock_hypopg_service)
         await handler.run_tool({"action": "reset"})
 
-        mock_hypopg_service.reset_hypothetical_indexes.assert_called_once()
+        mock_hypopg_service.reset.assert_called_once()
 
 
 class TestIndexAdvisorToolHandler:
@@ -226,15 +235,23 @@ class TestIndexAdvisorToolHandler:
     @pytest.mark.asyncio
     async def test_run_tool_from_workload(self, mock_index_advisor):
         """Test getting recommendations from workload analysis."""
-        mock_index_advisor.analyze_workload = AsyncMock(return_value=[
-            {
-                "table": "users",
-                "columns": ["email"],
-                "index_type": "btree",
-                "estimated_improvement_percent": 50,
-                "create_statement": "CREATE INDEX idx_users_email ON users(email)"
-            }
-        ])
+        from pgtuner_mcp.services.index_advisor import WorkloadAnalysisResult, IndexRecommendation
+
+        mock_index_advisor.analyze_workload = AsyncMock(return_value=WorkloadAnalysisResult(
+            recommendations=[
+                IndexRecommendation(
+                    table="users",
+                    columns=["email"],
+                    using="btree",
+                    estimated_improvement=50.0,
+                    reason="Improves query performance",
+                    create_statement="CREATE INDEX idx_users_email ON users(email)"
+                )
+            ],
+            analyzed_queries=10,
+            total_improvement=50.0,
+            error=None
+        ))
 
         handler = IndexAdvisorToolHandler(mock_index_advisor)
         result = await handler.run_tool({})
@@ -245,14 +262,23 @@ class TestIndexAdvisorToolHandler:
     @pytest.mark.asyncio
     async def test_run_tool_with_queries(self, mock_index_advisor):
         """Test getting recommendations from specific queries."""
-        mock_index_advisor.analyze_query = AsyncMock(return_value=[
-            {
-                "table": "orders",
-                "columns": ["status"],
-                "estimated_improvement_percent": 30,
-                "create_statement": "CREATE INDEX idx_orders_status ON orders(status)"
-            }
-        ])
+        from pgtuner_mcp.services.index_advisor import WorkloadAnalysisResult, IndexRecommendation
+
+        mock_index_advisor.analyze_queries = AsyncMock(return_value=WorkloadAnalysisResult(
+            recommendations=[
+                IndexRecommendation(
+                    table="orders",
+                    columns=["status"],
+                    using="btree",
+                    estimated_improvement=30.0,
+                    reason="Improves query performance",
+                    create_statement="CREATE INDEX idx_orders_status ON orders(status)"
+                )
+            ],
+            analyzed_queries=1,
+            total_improvement=30.0,
+            error=None
+        ))
 
         handler = IndexAdvisorToolHandler(mock_index_advisor)
         result = await handler.run_tool({
@@ -260,7 +286,7 @@ class TestIndexAdvisorToolHandler:
         })
 
         assert "recommendations" in result[0].text
-        mock_index_advisor.analyze_query.assert_called_once()
+        mock_index_advisor.analyze_queries.assert_called_once()
 
 
 class TestDatabaseHealthToolHandler:

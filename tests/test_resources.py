@@ -7,7 +7,7 @@ and other non-JSON-serializable types are properly handled.
 import json
 from decimal import Decimal
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -22,10 +22,9 @@ class TestHealthResourceJsonSerialization:
     @pytest.mark.asyncio
     async def test_connections_check_with_decimal_values(self):
         """Test that connections check handles Decimal values from database."""
-        from pgtuner_mcp.server import _get_health_resource, db_pool
+        from pgtuner_mcp.server import _get_health_resource
 
-        # Mock the database pool and SQL driver
-        mock_pool = MagicMock()
+        # Mock the SQL driver
         mock_driver = AsyncMock()
 
         # Simulate database returning Decimal types (common with COUNT aggregates)
@@ -38,8 +37,7 @@ class TestHealthResourceJsonSerialization:
             "max_connections": Decimal("100"),
         }])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("connections")
 
@@ -59,7 +57,6 @@ class TestHealthResourceJsonSerialization:
         """Test that cache check handles Decimal values from SUM aggregates."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # Simulate database returning Decimal types from SUM aggregates
@@ -70,8 +67,7 @@ class TestHealthResourceJsonSerialization:
             "idx_hit": Decimal("49500"),
         }])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("cache")
 
@@ -88,7 +84,6 @@ class TestHealthResourceJsonSerialization:
         """Test that cache check handles None values (empty tables)."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # Simulate database returning None (no tables yet)
@@ -99,8 +94,7 @@ class TestHealthResourceJsonSerialization:
             "idx_hit": None,
         }])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("cache")
 
@@ -116,7 +110,6 @@ class TestHealthResourceJsonSerialization:
         """Test that locks check handles Decimal values from COUNT aggregates."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # Simulate database returning Decimal types
@@ -126,8 +119,7 @@ class TestHealthResourceJsonSerialization:
             "exclusive_locks": Decimal("5"),
         }])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("locks")
 
@@ -144,7 +136,6 @@ class TestHealthResourceJsonSerialization:
         """Test that bloat check handles Decimal values from database."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # Simulate database returning Decimal types
@@ -165,8 +156,7 @@ class TestHealthResourceJsonSerialization:
             },
         ])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("bloat")
 
@@ -182,7 +172,6 @@ class TestHealthResourceJsonSerialization:
         """Test that replication check handles Decimal lag values."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # Simulate database returning Decimal and special types
@@ -198,8 +187,7 @@ class TestHealthResourceJsonSerialization:
             },
         ])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("replication")
 
@@ -214,7 +202,6 @@ class TestHealthResourceJsonSerialization:
         """Test that 'all' check type properly aggregates all checks."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # Create different return values for different queries
@@ -250,8 +237,7 @@ class TestHealthResourceJsonSerialization:
 
         mock_driver.execute_query = mock_execute_query
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_health_resource("all")
 
@@ -270,9 +256,9 @@ class TestHealthResourceJsonSerialization:
         """Test that unknown check type returns proper error."""
         from pgtuner_mcp.server import _get_health_resource
 
-        mock_pool = MagicMock()
+        mock_driver = AsyncMock()
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
             result = await _get_health_resource("unknown_type")
 
             parsed = json.loads(result)
@@ -290,7 +276,6 @@ class TestTableStatsResourceJsonSerialization:
         """Test that table stats handles Decimal values."""
         from pgtuner_mcp.server import _get_table_stats_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         # First call: table stats
@@ -326,8 +311,7 @@ class TestTableStatsResourceJsonSerialization:
             }],
         ])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_table_stats_resource("public", "users")
 
@@ -347,12 +331,10 @@ class TestTableStatsResourceJsonSerialization:
         """Test that missing table returns proper error."""
         from pgtuner_mcp.server import _get_table_stats_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
         mock_driver.execute_query = AsyncMock(return_value=[])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_table_stats_resource("public", "nonexistent")
 
@@ -370,7 +352,6 @@ class TestQueryStatsResourceJsonSerialization:
         """Test that query stats handles Decimal values from pg_stat_statements."""
         from pgtuner_mcp.server import _get_query_stats_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         mock_driver.execute_query = AsyncMock(return_value=[{
@@ -393,8 +374,7 @@ class TestQueryStatsResourceJsonSerialization:
             "temp_blks_written": Decimal("0"),
         }])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_query_stats_resource("12345678901234567")
 
@@ -416,7 +396,6 @@ class TestSettingsResourceJsonSerialization:
         """Test that settings resource handles various value types."""
         from pgtuner_mcp.server import _get_settings_resource
 
-        mock_pool = MagicMock()
         mock_driver = AsyncMock()
 
         mock_driver.execute_query = AsyncMock(return_value=[
@@ -440,8 +419,7 @@ class TestSettingsResourceJsonSerialization:
             },
         ])
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool), \
-             patch('pgtuner_mcp.server.SqlDriver', return_value=mock_driver):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
 
             result = await _get_settings_resource("memory")
 
@@ -456,9 +434,9 @@ class TestSettingsResourceJsonSerialization:
         """Test that unknown category returns proper error."""
         from pgtuner_mcp.server import _get_settings_resource
 
-        mock_pool = MagicMock()
+        mock_driver = AsyncMock()
 
-        with patch('pgtuner_mcp.server.get_db_pool', return_value=mock_pool):
+        with patch('pgtuner_mcp.server.get_sql_driver', return_value=mock_driver):
             result = await _get_settings_resource("invalid_category")
 
             parsed = json.loads(result)

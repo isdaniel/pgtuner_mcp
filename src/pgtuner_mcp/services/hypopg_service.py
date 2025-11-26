@@ -12,7 +12,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from .sql_driver import (
-    DbConnPool,
     SqlDriver,
     check_extension_available,
     check_extension_installed,
@@ -54,15 +53,14 @@ class HypoPGService:
     - Don't affect EXPLAIN ANALYZE (actual execution)
     """
 
-    def __init__(self, pool: DbConnPool):
+    def __init__(self, driver: SqlDriver):
         """
         Initialize the HypoPG service.
 
         Args:
-            pool: Database connection pool
+            driver: SQL driver instance for executing queries
         """
-        self.pool = pool
-        self.driver = SqlDriver(pool)
+        self.driver = driver
         self._status_cache: HypoPGStatus | None = None
 
     async def check_status(self, force_refresh: bool = False) -> HypoPGStatus:
@@ -90,7 +88,7 @@ class HypoPGService:
                     "SELECT extversion FROM pg_extension WHERE extname = 'hypopg'"
                 )
                 if result:
-                    status.version = result[0].cells.get("extversion")
+                    status.version = result[0].get("extversion")
 
                 status.is_installed = True
                 status.is_available = True
@@ -185,7 +183,7 @@ class HypoPGService:
         if not result:
             raise RuntimeError(f"Failed to create hypothetical index: {create_stmt}")
 
-        row = result[0].cells
+        row = result[0]
         index = HypotheticalIndex(
             indexrelid=row.get("indexrelid"),
             index_name=row.get("indexname"),
@@ -220,7 +218,7 @@ class HypoPGService:
         if not result:
             raise RuntimeError(f"Failed to create hypothetical index: {create_index_sql}")
 
-        row = result[0].cells
+        row = result[0]
         index = HypotheticalIndex(
             indexrelid=row.get("indexrelid"),
             index_name=row.get("indexname"),
@@ -251,13 +249,12 @@ class HypoPGService:
 
         indexes = []
         for row in result:
-            cells = row.cells
             index = HypotheticalIndex(
-                indexrelid=cells.get("indexrelid"),
-                index_name=cells.get("index_name"),
-                schema_name=cells.get("schema_name"),
-                table_name=cells.get("table_name"),
-                am_name=cells.get("am_name"),
+                indexrelid=row.get("indexrelid"),
+                index_name=row.get("index_name"),
+                schema_name=row.get("schema_name"),
+                table_name=row.get("table_name"),
+                am_name=row.get("am_name"),
             )
             # Get definition and size
             index.definition = await self.get_index_definition(index.indexrelid)
@@ -281,7 +278,7 @@ class HypoPGService:
                 f"SELECT hypopg_get_indexdef({indexrelid}) as indexdef"
             )
             if result:
-                return result[0].cells.get("indexdef")
+                return result[0].get("indexdef")
         except Exception as e:
             logger.warning(f"Could not get index definition: {e}")
         return None
@@ -301,7 +298,7 @@ class HypoPGService:
                 f"SELECT hypopg_relation_size({indexrelid}) as size"
             )
             if result:
-                return result[0].cells.get("size")
+                return result[0].get("size")
         except Exception as e:
             logger.warning(f"Could not get index size: {e}")
         return None
@@ -362,7 +359,7 @@ class HypoPGService:
                 f"SELECT hypopg_hide_index({indexrelid})"
             )
             if result:
-                return result[0].cells.get("hypopg_hide_index", False)
+                return result[0].get("hypopg_hide_index", False)
         except Exception as e:
             logger.error(f"Failed to hide index: {e}")
         return False
@@ -384,7 +381,7 @@ class HypoPGService:
                 f"SELECT hypopg_unhide_index({indexrelid})"
             )
             if result:
-                return result[0].cells.get("hypopg_unhide_index", False)
+                return result[0].get("hypopg_unhide_index", False)
         except Exception as e:
             logger.error(f"Failed to unhide index: {e}")
         return False
@@ -419,7 +416,7 @@ class HypoPGService:
                 "SELECT * FROM hypopg_hidden_indexes"
             )
             if result:
-                return [row.cells for row in result]
+                return result
         except Exception as e:
             logger.warning(f"Could not list hidden indexes: {e}")
         return []
@@ -449,7 +446,7 @@ class HypoPGService:
         before_result = await self.driver.execute_query(
             f"EXPLAIN (FORMAT JSON, COSTS TRUE) {query}"
         )
-        before_plan = before_result[0].cells if before_result else {}
+        before_plan = before_result[0] if before_result else {}
 
         # Create hypothetical index
         hypo_index = await self.create_index(table, columns, using)
@@ -459,7 +456,7 @@ class HypoPGService:
             after_result = await self.driver.execute_query(
                 f"EXPLAIN (FORMAT JSON, COSTS TRUE) {query}"
             )
-            after_plan = after_result[0].cells if after_result else {}
+            after_plan = after_result[0] if after_result else {}
 
             # Extract costs
             before_cost = self._extract_total_cost(before_plan)

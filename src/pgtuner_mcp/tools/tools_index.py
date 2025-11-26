@@ -86,24 +86,42 @@ The recommendations consider:
             workload_queries = arguments.get("workload_queries")
             max_recommendations = arguments.get("max_recommendations", 10)
             min_improvement = arguments.get("min_improvement_percent", 10.0)
-            use_hypopg = arguments.get("include_hypothetical_testing", True)
             target_tables = arguments.get("target_tables")
 
             if workload_queries:
                 # Analyze specific queries
-                all_recommendations = []
-                for query in workload_queries:
-                    recs = await self.index_advisor.analyze_query(
-                        query,
-                        test_with_hypopg=use_hypopg
-                    )
-                    all_recommendations.extend(recs)
+                result = await self.index_advisor.analyze_queries(
+                    workload_queries,
+                    max_recommendations=max_recommendations
+                )
             else:
                 # Analyze workload from pg_stat_statements
-                all_recommendations = await self.index_advisor.analyze_workload(
+                result = await self.index_advisor.analyze_workload(
                     limit=50,
-                    min_calls=5
+                    min_calls=5,
+                    max_recommendations=max_recommendations
                 )
+
+            # Check for errors
+            if result.error:
+                return self.format_json_result({
+                    "error": result.error,
+                    "analyzed_queries": result.analyzed_queries
+                })
+
+            # Convert IndexRecommendation objects to dictionaries
+            all_recommendations = [
+                {
+                    "table": rec.table,
+                    "columns": rec.columns,
+                    "using": rec.using,
+                    "estimated_size_bytes": rec.estimated_size_bytes,
+                    "estimated_improvement_percent": rec.estimated_improvement,
+                    "reason": rec.reason,
+                    "create_statement": rec.definition
+                }
+                for rec in result.recommendations
+            ]
 
             # Filter by target tables if specified
             if target_tables:
@@ -116,23 +134,24 @@ The recommendations consider:
             # Filter by minimum improvement
             recommendations = [
                 r for r in all_recommendations
-                if r.get("estimated_improvement_percent", 0) >= min_improvement
+                if (r.get("estimated_improvement_percent") or 0) >= min_improvement
             ]
 
             # Sort by improvement and limit
             recommendations.sort(
-                key=lambda x: x.get("estimated_improvement_percent", 0),
+                key=lambda x: x.get("estimated_improvement_percent") or 0,
                 reverse=True
             )
             recommendations = recommendations[:max_recommendations]
 
             # Check HypoPG availability
-            hypopg_available = await self.index_advisor.hypopg_service.check_hypopg_available()
+            hypopg_status = await self.index_advisor.hypopg.check_status()
 
             output = {
                 "summary": {
                     "total_recommendations": len(recommendations),
-                    "hypopg_available": hypopg_available,
+                    "analyzed_queries": result.analyzed_queries,
+                    "hypopg_available": hypopg_status.is_installed,
                     "analysis_source": "provided_queries" if workload_queries else "pg_stat_statements"
                 },
                 "recommendations": recommendations,
@@ -253,9 +272,9 @@ Returns both the original and hypothetical execution plans for comparison."""
 
             # Test with hypothetical indexes if provided
             if hypothetical_indexes:
-                hypopg_available = await self.hypopg_service.check_hypopg_available()
+                hypopg_status = await self.hypopg_service.check_status()
 
-                if not hypopg_available:
+                if not hypopg_status.is_installed:
                     output["error"] = (
                         "HypoPG extension is not available. "
                         "Install it with: CREATE EXTENSION hypopg;"
@@ -266,18 +285,17 @@ Returns both the original and hypothetical execution plans for comparison."""
                 created_indexes = []
                 try:
                     for idx_spec in hypothetical_indexes:
-                        result = await self.hypopg_service.create_hypothetical_index(
+                        hypo_index = await self.hypopg_service.create_index(
                             table=idx_spec["table"],
                             columns=idx_spec["columns"],
-                            index_type=idx_spec.get("index_type", "btree"),
-                            unique=idx_spec.get("unique", False)
+                            using=idx_spec.get("index_type", "btree"),
                         )
-                        if result.get("success"):
-                            created_indexes.append({
-                                **idx_spec,
-                                "index_name": result.get("index_name"),
-                                "estimated_size": result.get("estimated_size")
-                            })
+                        created_indexes.append({
+                            **idx_spec,
+                            "index_name": hypo_index.index_name,
+                            "index_oid": hypo_index.indexrelid,
+                            "estimated_size": hypo_index.estimated_size
+                        })
 
                     # Get the plan with hypothetical indexes
                     hypo_result = await self.sql_driver.execute_query(original_explain)
@@ -299,7 +317,7 @@ Returns both the original and hypothetical execution plans for comparison."""
 
                 finally:
                     # Clean up hypothetical indexes
-                    await self.hypopg_service.reset_hypothetical_indexes()
+                    await self.hypopg_service.reset()
 
             return self.format_json_result(output)
 
@@ -434,68 +452,83 @@ This is useful for:
             action = arguments.get("action")
 
             if action == "check":
-                available = await self.hypopg_service.check_hypopg_available()
+                status = await self.hypopg_service.check_status()
                 return self.format_json_result({
-                    "hypopg_available": available,
-                    "message": "HypoPG extension is available" if available
-                              else "HypoPG extension is NOT installed. Install with: CREATE EXTENSION hypopg;"
+                    "hypopg_available": status.is_installed,
+                    "hypopg_version": status.version,
+                    "message": status.message
                 })
 
             if action == "create":
                 self.validate_required_args(arguments, ["table", "columns"])
-                result = await self.hypopg_service.create_hypothetical_index(
+                hypo_index = await self.hypopg_service.create_index(
                     table=arguments["table"],
                     columns=arguments["columns"],
-                    index_type=arguments.get("index_type", "btree"),
-                    unique=arguments.get("unique", False)
+                    using=arguments.get("index_type", "btree"),
                 )
-                return self.format_json_result(result)
+                return self.format_json_result({
+                    "success": True,
+                    "index_oid": hypo_index.indexrelid,
+                    "index_name": hypo_index.index_name,
+                    "table": hypo_index.table_name,
+                    "definition": hypo_index.definition,
+                    "estimated_size_bytes": hypo_index.estimated_size
+                })
 
             elif action == "list":
-                indexes = await self.hypopg_service.list_hypothetical_indexes()
+                indexes = await self.hypopg_service.list_indexes()
                 return self.format_json_result({
                     "count": len(indexes),
-                    "hypothetical_indexes": indexes
+                    "hypothetical_indexes": [
+                        {
+                            "index_oid": idx.indexrelid,
+                            "index_name": idx.index_name,
+                            "schema_name": idx.schema_name,
+                            "table_name": idx.table_name,
+                            "access_method": idx.am_name,
+                            "definition": idx.definition,
+                            "estimated_size_bytes": idx.estimated_size
+                        }
+                        for idx in indexes
+                    ]
                 })
 
             elif action == "drop":
                 self.validate_required_args(arguments, ["index_id"])
-                result = await self.hypopg_service.drop_hypothetical_index(
+                success = await self.hypopg_service.drop_index(
                     arguments["index_id"]
                 )
-                return self.format_json_result(result)
+                return self.format_json_result({
+                    "success": success,
+                    "dropped_index_id": arguments["index_id"]
+                })
 
             elif action == "reset":
-                result = await self.hypopg_service.reset_hypothetical_indexes()
-                return self.format_json_result(result)
+                success = await self.hypopg_service.reset()
+                return self.format_json_result({
+                    "success": success,
+                    "message": "All hypothetical indexes have been removed" if success else "Failed to reset hypothetical indexes"
+                })
 
             elif action == "estimate_size":
                 self.validate_required_args(arguments, ["table", "columns"])
                 # Create temporarily to get size estimate
-                create_result = await self.hypopg_service.create_hypothetical_index(
+                hypo_index = await self.hypopg_service.create_index(
                     table=arguments["table"],
                     columns=arguments["columns"],
-                    index_type=arguments.get("index_type", "btree"),
-                    unique=arguments.get("unique", False)
+                    using=arguments.get("index_type", "btree"),
                 )
 
-                if create_result.get("success"):
-                    size = await self.hypopg_service.get_index_size(
-                        create_result["index_oid"]
-                    )
-                    # Clean up
-                    await self.hypopg_service.drop_hypothetical_index(
-                        create_result["index_oid"]
-                    )
-                    return self.format_json_result({
-                        "table": arguments["table"],
-                        "columns": arguments["columns"],
-                        "index_type": arguments.get("index_type", "btree"),
-                        "estimated_size": size,
-                        "estimated_size_bytes": create_result.get("estimated_size_bytes")
-                    })
-                else:
-                    return self.format_json_result(create_result)
+                size = hypo_index.estimated_size
+                # Clean up
+                await self.hypopg_service.drop_index(hypo_index.indexrelid)
+
+                return self.format_json_result({
+                    "table": arguments["table"],
+                    "columns": arguments["columns"],
+                    "index_type": arguments.get("index_type", "btree"),
+                    "estimated_size_bytes": size
+                })
 
             else:
                 return self.format_result(f"Unknown action: {action}")

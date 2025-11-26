@@ -18,7 +18,7 @@ except ImportError:
     HAS_PGLAST = False
 
 from .hypopg_service import HypoPGService
-from .sql_driver import DbConnPool, SqlDriver
+from .sql_driver import SqlDriver
 
 logger = logging.getLogger(__name__)
 
@@ -62,16 +62,15 @@ class IndexAdvisor:
     - HypoPG for hypothetical index testing
     """
 
-    def __init__(self, pool: DbConnPool):
+    def __init__(self, driver: SqlDriver):
         """
         Initialize the index advisor.
 
         Args:
-            pool: Database connection pool
+            driver: SQL driver instance for executing queries
         """
-        self.pool = pool
-        self.driver = SqlDriver(pool)
-        self.hypopg = HypoPGService(pool)
+        self.driver = driver
+        self.hypopg = HypoPGService(driver)
 
     async def analyze_query(
         self,
@@ -269,7 +268,7 @@ class IndexAdvisor:
                 result.error = "No queries found matching criteria"
                 return result
 
-            queries = [row.cells.get("query") for row in queries_result if row.cells.get("query")]
+            queries = [row.get("query") for row in queries_result if row.get("query")]
             result.analyzed_queries = len(queries)
 
             # Analyze the collected queries
@@ -312,7 +311,7 @@ class IndexAdvisor:
         if not result:
             return []
 
-        return [row.cells for row in result]
+        return result
 
     async def get_index_health(self, schema: str = "public") -> dict[str, Any]:
         """
@@ -351,7 +350,7 @@ class IndexAdvisor:
                 HAVING count(*) > 1
             """)
             if dup_result:
-                health["duplicate_indexes"] = [row.cells for row in dup_result]
+                health["duplicate_indexes"] = dup_result
         except Exception as e:
             logger.warning(f"Error finding duplicate indexes: {e}")
 
@@ -371,7 +370,7 @@ class IndexAdvisor:
                 ORDER BY pg_relation_size(indexrelid) DESC
             """)
             if unused_result:
-                health["unused_indexes"] = [row.cells for row in unused_result]
+                health["unused_indexes"] = unused_result
         except Exception as e:
             logger.warning(f"Error finding unused indexes: {e}")
 
@@ -389,7 +388,7 @@ class IndexAdvisor:
                 WHERE NOT i.indisvalid
             """)
             if invalid_result:
-                health["invalid_indexes"] = [row.cells for row in invalid_result]
+                health["invalid_indexes"] = invalid_result
         except Exception as e:
             logger.warning(f"Error finding invalid indexes: {e}")
 

@@ -83,8 +83,9 @@ app = Server("pgtuner_mcp")
 # Global tool handlers registry
 tool_handlers: dict[str, ToolHandler] = {}
 
-# Global database connection pool
+# Global database connection pool and SQL driver
 db_pool: DbConnPool | None = None
+sql_driver: SqlDriver | None = None
 
 
 def add_tool_handler(tool_handler: ToolHandler) -> None:
@@ -111,21 +112,20 @@ def get_tool_handler(name: str) -> ToolHandler | None:
     """
     return tool_handlers.get(name)
 
-
-def get_db_pool() -> DbConnPool:
+def get_sql_driver() -> SqlDriver:
     """
-    Get the global database connection pool.
+    Get the global SQL driver instance.
 
     Returns:
-        The database connection pool
+        The SQL driver instance
 
     Raises:
-        RuntimeError: If the database pool is not initialized
+        RuntimeError: If the SQL driver is not initialized
     """
-    global db_pool
-    if db_pool is None:
-        raise RuntimeError("Database connection pool not initialized")
-    return db_pool
+    global sql_driver
+    if sql_driver is None:
+        raise RuntimeError("SQL driver not initialized")
+    return sql_driver
 
 
 def register_all_tools() -> None:
@@ -135,27 +135,26 @@ def register_all_tools() -> None:
     This function serves as the central registry for all tools.
     New tool handlers should be added here for automatic registration.
     """
-    pool = get_db_pool()
-    sql_driver = SqlDriver(pool)
-    hypopg_service = HypoPGService(sql_driver)
-    index_advisor = IndexAdvisor(sql_driver)
+    driver = get_sql_driver()
+    hypopg_service = HypoPGService(driver)
+    index_advisor = IndexAdvisor(driver)
 
     # Performance analysis tools
-    add_tool_handler(GetSlowQueriesToolHandler(sql_driver))
-    add_tool_handler(AnalyzeQueryToolHandler(sql_driver))
-    add_tool_handler(TableStatsToolHandler(sql_driver))
+    add_tool_handler(GetSlowQueriesToolHandler(driver))
+    add_tool_handler(AnalyzeQueryToolHandler(driver))
+    add_tool_handler(TableStatsToolHandler(driver))
 
     # Index tuning tools
     add_tool_handler(IndexAdvisorToolHandler(index_advisor))
-    add_tool_handler(ExplainQueryToolHandler(sql_driver, hypopg_service))
+    add_tool_handler(ExplainQueryToolHandler(driver, hypopg_service))
     add_tool_handler(HypoPGToolHandler(hypopg_service))
-    add_tool_handler(UnusedIndexesToolHandler(sql_driver))
+    add_tool_handler(UnusedIndexesToolHandler(driver))
 
     # Database health tools
-    add_tool_handler(DatabaseHealthToolHandler(sql_driver))
-    add_tool_handler(ActiveQueriesToolHandler(sql_driver))
-    add_tool_handler(WaitEventsToolHandler(sql_driver))
-    add_tool_handler(DatabaseSettingsToolHandler(sql_driver))
+    add_tool_handler(DatabaseHealthToolHandler(driver))
+    add_tool_handler(ActiveQueriesToolHandler(driver))
+    add_tool_handler(WaitEventsToolHandler(driver))
+    add_tool_handler(DatabaseSettingsToolHandler(driver))
 
     logger.info(f"Registered {len(tool_handlers)} tool handlers")
 
@@ -832,8 +831,7 @@ async def read_resource(uri: str) -> str:
 async def _get_table_stats_resource(schema: str, table_name: str) -> str:
     """Get table statistics as JSON."""
 
-    pool = get_db_pool()
-    sql_driver = SqlDriver(pool)
+    driver = get_sql_driver()
 
     query = """
         SELECT
@@ -862,7 +860,7 @@ async def _get_table_stats_resource(schema: str, table_name: str) -> str:
         WHERE schemaname = %s AND relname = %s
     """
 
-    result = await sql_driver.execute_query(query, (schema, table_name))
+    result = await driver.execute_query(query, (schema, table_name))
 
     if not result:
         return json.dumps({"error": f"Table {schema}.{table_name} not found"}, indent=2)
@@ -874,7 +872,7 @@ async def _get_table_stats_resource(schema: str, table_name: str) -> str:
             pg_size_pretty(pg_table_size(quote_ident(%s) || '.' || quote_ident(%s))) as table_size,
             pg_size_pretty(pg_indexes_size(quote_ident(%s) || '.' || quote_ident(%s))) as indexes_size
     """
-    size_result = await sql_driver.execute_query(
+    size_result = await driver.execute_query(
         size_query, (schema, table_name, schema, table_name, schema, table_name)
     )
 
@@ -915,8 +913,7 @@ async def _get_table_stats_resource(schema: str, table_name: str) -> str:
 async def _get_table_indexes_resource(schema: str, table_name: str) -> str:
     """Get table indexes as JSON."""
 
-    pool = get_db_pool()
-    sql_driver = SqlDriver(pool)
+    driver = get_sql_driver()
 
     query = """
         SELECT
@@ -935,7 +932,7 @@ async def _get_table_indexes_resource(schema: str, table_name: str) -> str:
         ORDER BY pg_relation_size(i.indexrelid) DESC
     """
 
-    result = await sql_driver.execute_query(query, (schema, table_name))
+    result = await driver.execute_query(query, (schema, table_name))
 
     indexes = []
     for row in result:
@@ -964,8 +961,7 @@ async def _get_table_indexes_resource(schema: str, table_name: str) -> str:
 async def _get_query_stats_resource(query_hash: str) -> str:
     """Get query statistics by hash from pg_stat_statements."""
 
-    pool = get_db_pool()
-    sql_driver = SqlDriver(pool)
+    driver = get_sql_driver()
 
     query = """
         SELECT
@@ -991,7 +987,7 @@ async def _get_query_stats_resource(query_hash: str) -> str:
     """
 
     try:
-        result = await sql_driver.execute_query(query, (query_hash,))
+        result = await driver.execute_query(query, (query_hash,))
     except Exception as e:
         return json.dumps({
             "error": "pg_stat_statements extension may not be installed or enabled",
@@ -1037,8 +1033,7 @@ async def _get_query_stats_resource(query_hash: str) -> str:
 async def _get_settings_resource(category: str) -> str:
     """Get PostgreSQL settings by category."""
 
-    pool = get_db_pool()
-    sql_driver = SqlDriver(pool)
+    driver = get_sql_driver()
 
     category_filters = {
         "memory": ["shared_buffers", "work_mem", "maintenance_work_mem", "effective_cache_size",
@@ -1072,7 +1067,7 @@ async def _get_settings_resource(category: str) -> str:
         ORDER BY name
     """
 
-    result = await sql_driver.execute_query(query, tuple(settings_filter))
+    result = await driver.execute_query(query, tuple(settings_filter))
 
     settings = []
     for row in result:
@@ -1096,8 +1091,7 @@ async def _get_settings_resource(category: str) -> str:
 async def _get_health_resource(check_type: str) -> str:
     """Get database health information by check type."""
 
-    pool = get_db_pool()
-    sql_driver = SqlDriver(pool)
+    driver = get_sql_driver()
 
     if check_type == "connections":
         query = """
@@ -1111,7 +1105,7 @@ async def _get_health_resource(check_type: str) -> str:
             FROM pg_stat_activity
             WHERE backend_type = 'client backend'
         """
-        result = await sql_driver.execute_query(query)
+        result = await driver.execute_query(query)
         row = result[0]
         usage_pct = round(row["total_connections"] / row["max_connections"] * 100, 2)
 
@@ -1138,7 +1132,7 @@ async def _get_health_resource(check_type: str) -> str:
                 sum(idx_blks_hit) as idx_hit
             FROM pg_statio_user_tables
         """
-        result = await sql_driver.execute_query(query)
+        result = await driver.execute_query(query)
         row = result[0]
 
         heap_total = (row["heap_hit"] or 0) + (row["heap_read"] or 0)
@@ -1163,7 +1157,7 @@ async def _get_health_resource(check_type: str) -> str:
                 count(*) FILTER (WHERE mode LIKE '%Exclusive%') as exclusive_locks
             FROM pg_locks
         """
-        result = await sql_driver.execute_query(query)
+        result = await driver.execute_query(query)
         row = result[0]
 
         return json.dumps({
@@ -1186,7 +1180,7 @@ async def _get_health_resource(check_type: str) -> str:
                 pg_wal_lsn_diff(sent_lsn, replay_lsn) as replication_lag_bytes
             FROM pg_stat_replication
         """
-        result = await sql_driver.execute_query(query)
+        result = await driver.execute_query(query)
 
         replicas = []
         for row in result:
@@ -1219,7 +1213,7 @@ async def _get_health_resource(check_type: str) -> str:
             ORDER BY n_dead_tup DESC
             LIMIT 10
         """
-        result = await sql_driver.execute_query(query)
+        result = await driver.execute_query(query)
 
         bloated_tables = []
         for row in result:
@@ -1522,22 +1516,24 @@ Use this baseline for comparison after making changes.
 
 async def initialize_db_pool(database_uri: str) -> None:
     """
-    Initialize the database connection pool.
+    Initialize the database connection pool and SQL driver.
 
     Args:
         database_uri: PostgreSQL connection URI
     """
-    global db_pool
+    global db_pool, sql_driver
     db_pool = DbConnPool(database_uri)
     await db_pool.connect()
-    logger.info("Database connection pool initialized successfully")
+    sql_driver = SqlDriver(db_pool)
+    logger.info("Database connection pool and SQL driver initialized successfully")
 
 
 async def cleanup_db_pool() -> None:
     """
-    Clean up the database connection pool.
+    Clean up the database connection pool and SQL driver.
     """
-    global db_pool
+    global db_pool, sql_driver
+    sql_driver = None
     if db_pool is not None:
         await db_pool.close()
         db_pool = None

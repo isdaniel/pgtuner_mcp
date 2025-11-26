@@ -474,7 +474,7 @@ or have performance issues."""
             table_filter = ""
             params = [schema_name]
             if table_name:
-                table_filter = "AND c.relname = %s"
+                table_filter = "AND c.relname ILIKE %s"
                 params.append(table_name)
 
             query = f"""

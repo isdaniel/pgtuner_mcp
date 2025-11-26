@@ -319,7 +319,7 @@ async def get_postgres_version(driver: SqlDriver) -> int:
     try:
         result = await driver.execute_query("SHOW server_version")
         if result:
-            version_string = result[0].cells["server_version"]
+            version_string = result[0]["server_version"]
             major_version = version_string.split(".")[0]
             return int(major_version)
     except Exception as e:

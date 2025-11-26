@@ -25,29 +25,63 @@ def mock_sql_driver():
 @pytest.fixture
 def mock_hypopg_service():
     """Create a mock HypoPG service for testing."""
+    from pgtuner_mcp.services.hypopg_service import HypoPGStatus, HypotheticalIndex
+
     service = AsyncMock()
-    service.check_hypopg_available = AsyncMock(return_value=True)
-    service.create_hypothetical_index = AsyncMock(return_value={
-        "success": True,
-        "index_name": "hypo_idx_test",
-        "index_oid": 12345,
-        "estimated_size": "8192 bytes"
-    })
-    service.list_hypothetical_indexes = AsyncMock(return_value=[])
-    service.drop_hypothetical_index = AsyncMock(return_value={"success": True})
-    service.reset_hypothetical_indexes = AsyncMock(return_value={"success": True})
-    service.get_index_size = AsyncMock(return_value="8 kB")
+    # check_status returns HypoPGStatus
+    service.check_status = AsyncMock(return_value=HypoPGStatus(
+        is_installed=True,
+        is_available=True,
+        version="1.3.1",
+        message="HypoPG extension is installed and ready."
+    ))
+    # create_index returns HypotheticalIndex
+    service.create_index = AsyncMock(return_value=HypotheticalIndex(
+        indexrelid=12345,
+        index_name="hypo_idx_test",
+        table_name="users",
+        schema_name="public",
+        am_name="btree",
+        definition="CREATE INDEX ON public.users USING btree (email)",
+        estimated_size=8192
+    ))
+    # list_indexes returns list of HypotheticalIndex
+    service.list_indexes = AsyncMock(return_value=[])
+    service.drop_index = AsyncMock(return_value=True)
+    service.reset = AsyncMock(return_value=True)
+    service.get_index_size = AsyncMock(return_value=8192)
     return service
 
 
 @pytest.fixture
 def mock_index_advisor(mock_sql_driver, mock_hypopg_service):
     """Create a mock Index Advisor for testing."""
+    from pgtuner_mcp.services.index_advisor import WorkloadAnalysisResult, IndexRecommendation
+
     advisor = AsyncMock()
-    advisor.sql_driver = mock_sql_driver
-    advisor.hypopg_service = mock_hypopg_service
-    advisor.analyze_workload = AsyncMock(return_value=[])
-    advisor.analyze_query = AsyncMock(return_value=[])
+    advisor.driver = mock_sql_driver
+    advisor.hypopg = mock_hypopg_service
+    # analyze_workload returns WorkloadAnalysisResult
+    advisor.analyze_workload = AsyncMock(return_value=WorkloadAnalysisResult(
+        recommendations=[],
+        analyzed_queries=0,
+        total_improvement=None,
+        error=None
+    ))
+    # analyze_queries returns WorkloadAnalysisResult
+    advisor.analyze_queries = AsyncMock(return_value=WorkloadAnalysisResult(
+        recommendations=[],
+        analyzed_queries=0,
+        total_improvement=None,
+        error=None
+    ))
+    # analyze_query returns WorkloadAnalysisResult
+    advisor.analyze_query = AsyncMock(return_value=WorkloadAnalysisResult(
+        recommendations=[],
+        analyzed_queries=1,
+        total_improvement=None,
+        error=None
+    ))
     return advisor
 
 
