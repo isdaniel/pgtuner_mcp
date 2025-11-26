@@ -3,6 +3,12 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Pepy Total Downloads](https://img.shields.io/pepy/dt/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/dog830228/pgtuner_mcp)](https://hub.docker.com/r/dog830228/pgtuner_mcp)
+
+
+
 
 <a href="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp/badge" />
@@ -73,7 +79,6 @@ pip install -e .
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `DATABASE_URI` | PostgreSQL connection string | Yes |
-| `PORT` | HTTP server port (default: 8080) | No |
 
 **Connection String Format:** `postgresql://user:password@host:port/database`
 
@@ -92,6 +97,19 @@ Add to your `cline_mcp_settings.json` or Claude Desktop config:
       },
       "disabled": false,
       "autoApprove": []
+    }
+  }
+}
+```
+
+Or Streamable HTTP Mode
+
+```json
+{
+  "mcpServers": {
+    "pgtuner_mcp": {
+      "type": "http",
+      "url": "http://localhost:8080/mcp"
     }
   }
 }
@@ -292,7 +310,6 @@ SELECT * FROM pg_stat_statements LIMIT 1;
 | `track_io_timing` | Low-Medium (~2-5%) | Enable in production, test first |
 | `track_functions = all` | Low | Enable for function-heavy workloads |
 | `pg_stat_statements.track_planning` | Medium | Enable only when investigating planning issues |
-| `auto_explain` | Variable | Use cautiously in production |
 | `log_min_duration_statement` | Low | Recommended for slow query identification |
 
 > **Tip**: Use `pg_test_timing` to measure the timing overhead on your specific system before enabling `track_io_timing`.
@@ -361,38 +378,28 @@ for stmt in unused["recommendations"]:
 
 ## Docker
 
-### Build
-
 ```bash
-# Standard build
-docker build -t pgtuner_mcp .
+docker pull  dog830228/pgtuner_mcp
 
-# For streamable-http mode
-docker build -f Dockerfile.streamable-http -t pgtuner_mcp:http .
-```
-
-### Run
-
-```bash
 # Streamable HTTP mode (recommended for web applications)
 docker run -p 8080:8080 \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
-  pgtuner_mcp --mode streamable-http
+  dog830228/pgtuner_mcp --mode streamable-http
 
 # Streamable HTTP stateless mode (for serverless)
 docker run -p 8080:8080 \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
-  pgtuner_mcp --mode streamable-http --stateless
+  dog830228/pgtuner_mcp --mode streamable-http --stateless
 
 # SSE mode (legacy web applications)
 docker run -p 8080:8080 \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
-  pgtuner_mcp --mode sse
+  dog830228/pgtuner_mcp --mode sse
 
 # stdio mode (for MCP clients like Claude Desktop)
 docker run -i \
   -e DATABASE_URI=postgresql://user:pass@host:5432/db \
-  pgtuner_mcp --mode stdio
+  dog830228/pgtuner_mcp --mode stdio
 ```
 
 ## Requirements
