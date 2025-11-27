@@ -1,0 +1,17 @@
+runtime: container
+startCommand:
+  type: http
+  configSchema:
+    type: object
+    required:
+      - database_uri
+    properties:
+      database_uri:
+        type: string
+        title: "Database URI"
+        description: "PostgreSQL connection string (e.g., postgresql://user:password@host:port/database)"
+  exampleConfig:
+    database_uri: "your-database-uri-here"
+build:
+  dockerfile: "Dockerfile.streamable-http"
+  dockerBuildPath: "."

@@ -9,8 +9,9 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
+from psycopg import OperationalError
 from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
+from psycopg_pool import AsyncConnectionPool, PoolTimeout
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,27 @@ class DbConnPool:
         """Get the last error message."""
         return self._last_error
 
+    async def reconnect(self) -> bool:
+        """
+        Attempt to reconnect to the database if the pool is invalid.
+
+        Returns:
+            True if reconnection was successful, False otherwise
+        """
+        if self._is_valid and self.pool:
+            return True
+
+        if not self.connection_url:
+            logger.error("Cannot reconnect: no connection URL stored")
+            return False
+
+        try:
+            await self.connect(self.connection_url)
+            return True
+        except Exception as e:
+            logger.error(f"Reconnection failed: {e}")
+            return False
+
 
 class SqlDriver:
     """
@@ -176,21 +198,31 @@ class SqlDriver:
             List of dictionaries representing rows or None for non-SELECT queries
 
         Raises:
-            ValueError: If pool is not connected
+            ValueError: If pool is not connected and reconnection fails
             Exception: If query execution fails
         """
+        # Attempt reconnection if pool is invalid
         if not self.pool.pool or not self.pool.is_valid:
-            raise ValueError("Database pool not connected")
+            logger.warning("Pool not connected, attempting to reconnect...")
+            if await self.pool.reconnect():
+                logger.info("Reconnection successful")
+            else:
+                raise ValueError(
+                    f"Database pool not connected and reconnection failed. "
+                    f"Last error: {self.pool.last_error}"
+                )
 
         try:
             async with self.pool.pool.connection() as connection:
                 return await self._execute_with_connection(
                     connection, query, params, force_readonly
                 )
-        except Exception as e:
-            # Mark pool as invalid on connection errors
+        except (ConnectionError, OSError, TimeoutError, OperationalError, PoolTimeout) as e:
             self.pool._is_valid = False
             self.pool._last_error = str(e)
+            logger.error(f"Connection error, marking pool as invalid: {e}")
+            raise
+        except Exception as e:
             logger.error(f"Error executing query: {e}")
             raise
 
