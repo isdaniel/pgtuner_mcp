@@ -1,5 +1,6 @@
 # PostgreSQL Performance Tuning MCP
 
+[![smithery badge](https://smithery.ai/badge/@isdaniel/pgtuner_mcp)](https://smithery.ai/server/@isdaniel/pgtuner_mcp)
 [![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
