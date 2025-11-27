@@ -220,6 +220,176 @@ class TestHypoPGToolHandler:
 
         mock_hypopg_service.reset.assert_called_once()
 
+    @pytest.mark.asyncio
+    async def test_hide_action(self, mock_hypopg_service):
+        """Test the hide action."""
+        mock_hypopg_service.hide_index = AsyncMock(return_value=True)
+
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({
+            "action": "hide",
+            "index_id": 12345
+        })
+
+        assert "success" in result[0].text.lower()
+        assert "hidden" in result[0].text.lower()
+        mock_hypopg_service.hide_index.assert_called_once_with(12345)
+
+    @pytest.mark.asyncio
+    async def test_hide_action_missing_args(self, mock_hypopg_service):
+        """Test hide action with missing arguments."""
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({"action": "hide"})
+
+        assert "Error" in result[0].text
+        assert "Missing required arguments" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_unhide_action(self, mock_hypopg_service):
+        """Test the unhide action."""
+        mock_hypopg_service.unhide_index = AsyncMock(return_value=True)
+
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({
+            "action": "unhide",
+            "index_id": 12345
+        })
+
+        assert "success" in result[0].text.lower()
+        mock_hypopg_service.unhide_index.assert_called_once_with(12345)
+
+    @pytest.mark.asyncio
+    async def test_unhide_action_missing_args(self, mock_hypopg_service):
+        """Test unhide action with missing arguments."""
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({"action": "unhide"})
+
+        assert "Error" in result[0].text
+        assert "Missing required arguments" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_list_hidden_action(self, mock_hypopg_service):
+        """Test the list_hidden action."""
+        mock_hypopg_service.list_hidden_indexes = AsyncMock(return_value=[
+            {"indexrelid": 12345, "index_name": "idx_users_email"}
+        ])
+
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({"action": "list_hidden"})
+
+        assert "hidden_indexes" in result[0].text
+        assert "count" in result[0].text
+        mock_hypopg_service.list_hidden_indexes.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_explain_with_index_action(self, mock_hypopg_service):
+        """Test the explain_with_index action."""
+        mock_hypopg_service.explain_with_hypothetical_index = AsyncMock(return_value={
+            "hypothetical_index": {
+                "indexrelid": 12345,
+                "name": "hypo_idx_test",
+                "definition": "CREATE INDEX ON users USING btree (email)",
+                "estimated_size": 8192
+            },
+            "before": {
+                "plan": {},
+                "total_cost": 100.0
+            },
+            "after": {
+                "plan": {},
+                "total_cost": 50.0
+            },
+            "improvement_percentage": 50.0,
+            "would_use_index": True
+        })
+
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({
+            "action": "explain_with_index",
+            "query": "SELECT * FROM users WHERE email = 'test@example.com'",
+            "table": "users",
+            "columns": ["email"]
+        })
+
+        assert "improvement_percentage" in result[0].text
+        mock_hypopg_service.explain_with_hypothetical_index.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_explain_with_index_action_missing_args(self, mock_hypopg_service):
+        """Test explain_with_index action with missing arguments."""
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({
+            "action": "explain_with_index",
+            "query": "SELECT * FROM users"
+            # Missing table and columns
+        })
+
+        assert "Error" in result[0].text
+        assert "Missing required arguments" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_drop_action(self, mock_hypopg_service):
+        """Test the drop action."""
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({
+            "action": "drop",
+            "index_id": 12345
+        })
+
+        assert "success" in result[0].text.lower()
+        mock_hypopg_service.drop_index.assert_called_once_with(12345)
+
+    @pytest.mark.asyncio
+    async def test_drop_action_missing_args(self, mock_hypopg_service):
+        """Test drop action with missing arguments."""
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({"action": "drop"})
+
+        assert "Error" in result[0].text
+        assert "Missing required arguments" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_create_action_with_schema_and_options(self, mock_hypopg_service):
+        """Test create action with schema, where, and include options."""
+        from pgtuner_mcp.services.hypopg_service import HypotheticalIndex
+        mock_hypopg_service.create_index = AsyncMock(return_value=HypotheticalIndex(
+            indexrelid=12345,
+            index_name="hypo_idx_test",
+            table_name="users",
+            schema_name="myschema",
+            am_name="btree",
+            definition="CREATE INDEX ON myschema.users USING btree (email) INCLUDE (name) WHERE active = true",
+            estimated_size=8192
+        ))
+
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({
+            "action": "create",
+            "table": "users",
+            "columns": ["email"],
+            "schema": "myschema",
+            "where": "active = true",
+            "include": ["name"]
+        })
+
+        assert "success" in result[0].text.lower()
+        mock_hypopg_service.create_index.assert_called_once_with(
+            table="users",
+            columns=["email"],
+            using="btree",
+            schema="myschema",
+            where="active = true",
+            include=["name"]
+        )
+
+    @pytest.mark.asyncio
+    async def test_unknown_action(self, mock_hypopg_service):
+        """Test unknown action returns error message."""
+        handler = HypoPGToolHandler(mock_hypopg_service)
+        result = await handler.run_tool({"action": "invalid_action"})
+
+        assert "Unknown action" in result[0].text
+
 
 class TestIndexAdvisorToolHandler:
     """Tests for IndexAdvisorToolHandler."""

@@ -391,16 +391,23 @@ HypoPG allows you to create "hypothetical" indexes that exist only in memory
 and can be used to test query plans without the overhead of creating real indexes.
 
 Actions:
-- create: Create a new hypothetical index
+- create: Create a new hypothetical index by specifying table and columns
 - list: List all current hypothetical indexes
 - drop: Drop a specific hypothetical index
 - reset: Drop all hypothetical indexes
 - estimate_size: Estimate the size of a hypothetical index
+- check: Check HypoPG extension status and availability
+- hide: Hide an existing real index from the query planner (useful for testing what-if scenarios)
+- unhide: Unhide a previously hidden index
+- list_hidden: List all currently hidden indexes
+- explain_with_index: Create a hypothetical index and explain a query with before/after comparison
 
 This is useful for:
 - Testing if an index would improve a query
 - Comparing different index strategies
-- Estimating index storage requirements"""
+- Estimating index storage requirements
+- Testing query performance without specific existing indexes (hide)
+- Simulating index removal scenarios"""
 
     def __init__(self, hypopg_service: HypoPGService):
         self.hypopg_service = hypopg_service
@@ -414,17 +421,21 @@ This is useful for:
                 "properties": {
                     "action": {
                         "type": "string",
-                        "enum": ["create", "list", "drop", "reset", "estimate_size", "check"],
+                        "enum": [
+                            "create", "list", "drop", "reset",
+                            "estimate_size", "check", "hide", "unhide",
+                            "list_hidden", "explain_with_index"
+                        ],
                         "description": "Action to perform"
                     },
                     "table": {
                         "type": "string",
-                        "description": "Table name (required for create, estimate_size)"
+                        "description": "Table name (required for create, estimate_size, explain_with_index)"
                     },
                     "columns": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Column names for the index (required for create, estimate_size)"
+                        "description": "Column names for the index (required for create, estimate_size, explain_with_index)"
                     },
                     "index_type": {
                         "type": "string",
@@ -439,7 +450,24 @@ This is useful for:
                     },
                     "index_id": {
                         "type": "integer",
-                        "description": "Index OID (required for drop)"
+                        "description": "Index OID (required for drop, hide, unhide)"
+                    },
+                    "query": {
+                        "type": "string",
+                        "description": "SQL query to explain (required for explain_with_index)"
+                    },
+                    "schema": {
+                        "type": "string",
+                        "description": "Schema name for the table (optional, for create and explain_with_index)"
+                    },
+                    "where": {
+                        "type": "string",
+                        "description": "Partial index WHERE condition (optional, for create)"
+                    },
+                    "include": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Columns to include in INCLUDE clause (optional, for create)"
                     }
                 },
                 "required": ["action"]
@@ -465,12 +493,16 @@ This is useful for:
                     table=arguments["table"],
                     columns=arguments["columns"],
                     using=arguments.get("index_type", "btree"),
+                    schema=arguments.get("schema"),
+                    where=arguments.get("where"),
+                    include=arguments.get("include"),
                 )
                 return self.format_json_result({
                     "success": True,
                     "index_oid": hypo_index.indexrelid,
                     "index_name": hypo_index.index_name,
                     "table": hypo_index.table_name,
+                    "schema": hypo_index.schema_name,
                     "definition": hypo_index.definition,
                     "estimated_size_bytes": hypo_index.estimated_size
                 })
@@ -529,6 +561,45 @@ This is useful for:
                     "index_type": arguments.get("index_type", "btree"),
                     "estimated_size_bytes": size
                 })
+
+            elif action == "hide":
+                self.validate_required_args(arguments, ["index_id"])
+                success = await self.hypopg_service.hide_index(
+                    arguments["index_id"]
+                )
+                return self.format_json_result({
+                    "success": success,
+                    "hidden_index_id": arguments["index_id"],
+                    "message": "Index is now hidden from the query planner" if success else "Failed to hide index"
+                })
+
+            elif action == "unhide":
+                self.validate_required_args(arguments, ["index_id"])
+                success = await self.hypopg_service.unhide_index(
+                    arguments["index_id"]
+                )
+                return self.format_json_result({
+                    "success": success,
+                    "unhidden_index_id": arguments["index_id"],
+                    "message": "Index is now visible to the query planner" if success else "Failed to unhide index"
+                })
+
+            elif action == "list_hidden":
+                hidden_indexes = await self.hypopg_service.list_hidden_indexes()
+                return self.format_json_result({
+                    "count": len(hidden_indexes),
+                    "hidden_indexes": hidden_indexes
+                })
+
+            elif action == "explain_with_index":
+                self.validate_required_args(arguments, ["query", "table", "columns"])
+                result = await self.hypopg_service.explain_with_hypothetical_index(
+                    query=arguments["query"],
+                    table=arguments["table"],
+                    columns=arguments["columns"],
+                    using=arguments.get("index_type", "btree"),
+                )
+                return self.format_json_result(result)
 
             else:
                 return self.format_result(f"Unknown action: {action}")
