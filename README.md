@@ -4,7 +4,7 @@
 [![PyPI - Downloads](https://img.shields.io/pypi/dm/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Pepy Total Downloads](https://img.shields.io/pepy/dt/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
-[![Docker Pulls](https://img.shields.io/docker/pulls/dog830228/pgtuner_mcp)](https://hub.docker.com/r/dog830228/pgtuner)
+[![Docker Pulls](https://img.shields.io/docker/pulls/dog830228/pgtuner_mcp)](https://hub.docker.com/r/dog830228/pgtuner_mcp)
 
 <a href="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp">
   <img width="380" height="200" src="https://glama.ai/mcp/servers/@isdaniel/pgtuner-mcp/badge" />
