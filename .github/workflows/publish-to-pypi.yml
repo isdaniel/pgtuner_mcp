@@ -25,11 +25,12 @@ jobs:
 
     - name: Install dependencies
       run: |
-        uv pip install --system build
-        uv pip install --system -e ".[dev]"
+        uv venv --python ${{ matrix.python-version }}
+        uv pip install build
+        uv pip install -e ".[dev]"
 
     - name: Run tests
-      run: pytest tests/ -v --tb=short
+      run: uv run pytest tests/ -v --tb=short
 
   build-and-publish:
     needs: build-test
@@ -47,10 +48,12 @@ jobs:
       run: uv python install 3.12
 
     - name: Install dependencies
-      run: uv pip install --system build
+      run: |
+        uv venv --python 3.12
+        uv pip install build
 
     - name: Build package
-      run: python -m build
+      run: uv run python -m build
 
     - name: Extract version from pyproject.toml
       run: |
