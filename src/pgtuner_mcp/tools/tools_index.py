@@ -649,11 +649,6 @@ Removing unused indexes can:
                         "description": "Minimum index size in MB to include",
                         "default": 0
                     },
-                    "max_scan_ratio": {
-                        "type": "number",
-                        "description": "Maximum scan ratio (scans/rows) to consider an index unused",
-                        "default": 0.01
-                    },
                     "include_duplicates": {
                         "type": "boolean",
                         "description": "Include analysis of duplicate/overlapping indexes",
@@ -669,10 +664,8 @@ Removing unused indexes can:
         try:
             schema_name = arguments.get("schema_name", "public")
             min_size_mb = arguments.get("min_size_mb", 0)
-            arguments.get("max_scan_ratio", 0.01)
             include_duplicates = arguments.get("include_duplicates", True)
 
-            # Find unused indexes
             unused_query = """
                 SELECT
                     s.schemaname,
@@ -689,8 +682,8 @@ Removing unused indexes can:
                 JOIN pg_stat_user_tables t ON s.relid = t.relid
                 WHERE s.schemaname = %s
                   AND pg_relation_size(s.indexrelid) >= %s * 1024 * 1024
-                  AND s.idx_scan = 0
                   AND s.indexrelname NOT LIKE '%%_pkey'
+                  AND s.idx_scan = 0
                 ORDER BY pg_relation_size(s.indexrelid) DESC
             """
 
