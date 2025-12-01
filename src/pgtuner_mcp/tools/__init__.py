@@ -1,6 +1,11 @@
 """Tools package for MCP PostgreSQL Tuning Expert."""
 
 from .toolhandler import ToolHandler
+from .tools_bloat import (
+    DatabaseBloatSummaryToolHandler,
+    IndexBloatToolHandler,
+    TableBloatToolHandler,
+)
 from .tools_health import (
     ActiveQueriesToolHandler,
     DatabaseHealthToolHandler,
@@ -35,4 +40,8 @@ __all__ = [
     "ActiveQueriesToolHandler",
     "WaitEventsToolHandler",
     "DatabaseSettingsToolHandler",
+    # Bloat detection tools
+    "TableBloatToolHandler",
+    "IndexBloatToolHandler",
+    "DatabaseBloatSummaryToolHandler",
 ]

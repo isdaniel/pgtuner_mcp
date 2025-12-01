@@ -22,7 +22,6 @@ from .sql_driver import SqlDriver
 
 logger = logging.getLogger(__name__)
 
-
 @dataclass
 class IndexRecommendation:
     """Represents an index recommendation."""
@@ -246,7 +245,7 @@ class IndexAdvisor:
             result.error = f"Error checking pg_stat_statements: {e}"
             return result
 
-        # Get top queries from pg_stat_statements
+        # Get top queries from pg_stat_statements (excluding system catalog queries)
         try:
             queries_result = await self.driver.execute_query(f"""
                 SELECT
@@ -257,6 +256,9 @@ class IndexAdvisor:
                 FROM pg_stat_statements
                 WHERE calls >= {min_calls}
                   AND mean_exec_time >= {min_avg_time_ms}
+                  AND query NOT LIKE '%pg_catalog%'
+                  AND query NOT LIKE '%information_schema%'
+                  AND query NOT LIKE '%pg_toast%'
                   AND query NOT LIKE '%pg_%'
                   AND query NOT LIKE '%$%'
                   AND query ~* '^\\s*(SELECT|UPDATE|DELETE)'
@@ -317,6 +319,9 @@ class IndexAdvisor:
         """
         Analyze index health for a schema.
 
+        Note: This analyzes only user/client indexes and excludes system
+        catalog indexes (pg_catalog, information_schema, pg_toast).
+
         Args:
             schema: Schema name
 
@@ -354,7 +359,7 @@ class IndexAdvisor:
         except Exception as e:
             logger.warning(f"Error finding duplicate indexes: {e}")
 
-        # Find unused indexes
+        # Find unused indexes (user tables only, exclude system schemas)
         try:
             unused_result = await self.driver.execute_query(f"""
                 SELECT
@@ -365,6 +370,7 @@ class IndexAdvisor:
                     pg_size_pretty(pg_relation_size(indexrelid)) as size
                 FROM pg_stat_user_indexes
                 WHERE schemaname = '{schema}'
+                  AND schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                   AND idx_scan = 0
                   AND indexrelname NOT LIKE '%%_pkey'
                 ORDER BY pg_relation_size(indexrelid) DESC

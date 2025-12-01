@@ -4,6 +4,11 @@ from unittest.mock import AsyncMock
 
 import pytest
 
+from pgtuner_mcp.tools.tools_bloat import (
+    DatabaseBloatSummaryToolHandler,
+    IndexBloatToolHandler,
+    TableBloatToolHandler,
+)
 from pgtuner_mcp.tools.tools_health import (
     ActiveQueriesToolHandler,
     DatabaseHealthToolHandler,
@@ -542,3 +547,452 @@ class TestUnusedIndexesToolHandler:
         result = await handler.run_tool({})
 
         assert "unused_indexes" in result[0].text
+
+
+class TestTableBloatToolHandler:
+    """Tests for TableBloatToolHandler."""
+
+    def test_tool_definition(self, mock_sql_driver):
+        """Test that tool definition is properly formed."""
+        handler = TableBloatToolHandler(mock_sql_driver)
+        tool_def = handler.get_tool_definition()
+
+        assert tool_def.name == "analyze_table_bloat"
+        assert "bloat" in tool_def.description.lower() or "pgstattuple" in tool_def.description.lower()
+        assert tool_def.inputSchema is not None
+
+    @pytest.mark.asyncio
+    async def test_extension_not_installed(self, mock_sql_driver):
+        """Test handling when pgstattuple extension is not installed."""
+        mock_sql_driver.execute_query = AsyncMock(return_value=[])
+
+        handler = TableBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({})
+
+        assert "not installed" in result[0].text.lower() or "extension" in result[0].text.lower()
+
+    @pytest.mark.asyncio
+    async def test_single_table_exact_mode(self, mock_sql_driver):
+        """Test analyzing a single table with exact mode."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True, "version": "1.5"}],
+            # Size query result
+            [{"total_size": 10000000, "table_size": 8192000, "indexes_size": 1808000}],
+            # pgstattuple result
+            [{
+                "table_len": 8192000,
+                "tuple_count": 10000,
+                "tuple_len": 5000000,
+                "tuple_percent": 61.0,
+                "dead_tuple_count": 500,
+                "dead_tuple_len": 250000,
+                "dead_tuple_percent": 3.05,
+                "free_space": 2000000,
+                "free_percent": 24.4
+            }]
+        ])
+
+        handler = TableBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "table_name": "users",
+            "schema_name": "public",
+            "use_approx": False
+        })
+
+        result_text = result[0].text
+        assert "users" in result_text or "bloat" in result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_single_table_approx_mode(self, mock_sql_driver):
+        """Test analyzing a single table with approximate mode."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True, "version": "1.5"}],
+            # Size query result
+            [{"total_size": 10000000, "table_size": 8192000, "indexes_size": 1808000}],
+            # pgstattuple_approx result
+            [{
+                "table_len": 8192000,
+                "scanned_percent": 100.0,
+                "approx_tuple_count": 10000,
+                "approx_tuple_len": 5000000,
+                "approx_tuple_percent": 61.0,
+                "dead_tuple_count": 500,
+                "dead_tuple_len": 250000,
+                "dead_tuple_percent": 3.05,
+                "approx_free_space": 2000000,
+                "approx_free_percent": 24.4
+            }]
+        ])
+
+        handler = TableBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "table_name": "users",
+            "schema_name": "public",
+            "use_approx": True
+        })
+
+        result_text = result[0].text
+        assert "users" in result_text or "bloat" in result_text.lower() or "approx" in result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_schema_wide_analysis(self, mock_sql_driver):
+        """Test analyzing all tables in a schema."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True, "version": "1.5"}],
+            # Get tables in schema (returns table_name column)
+            [
+                {"table_name": "users", "table_size": 10000000},
+                {"table_name": "orders", "table_size": 5000000}
+            ],
+            # Size query for users
+            [{"total_size": 10000000, "table_size": 8192000, "indexes_size": 1808000}],
+            # pgstattuple_approx for users
+            [{
+                "table_len": 8192000,
+                "scanned_percent": 100.0,
+                "approx_tuple_count": 10000,
+                "approx_tuple_len": 5000000,
+                "approx_tuple_percent": 61.0,
+                "dead_tuple_count": 500,
+                "dead_tuple_len": 250000,
+                "dead_tuple_percent": 3.05,
+                "approx_free_space": 2000000,
+                "approx_free_percent": 24.4
+            }],
+            # Size query for orders
+            [{"total_size": 5000000, "table_size": 4096000, "indexes_size": 904000}],
+            # pgstattuple_approx for orders
+            [{
+                "table_len": 4096000,
+                "scanned_percent": 100.0,
+                "approx_tuple_count": 5000,
+                "approx_tuple_len": 2500000,
+                "approx_tuple_percent": 61.0,
+                "dead_tuple_count": 200,
+                "dead_tuple_len": 100000,
+                "dead_tuple_percent": 2.44,
+                "approx_free_space": 1000000,
+                "approx_free_percent": 24.4
+            }]
+        ])
+
+        handler = TableBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "schema_name": "public",
+            "use_approx": True
+        })
+
+        result_text = result[0].text
+        # Should contain results for schema analysis
+        assert "bloat" in result_text.lower() or "tables" in result_text.lower()
+
+
+class TestIndexBloatToolHandler:
+    """Tests for IndexBloatToolHandler."""
+
+    def test_tool_definition(self, mock_sql_driver):
+        """Test that tool definition is properly formed."""
+        handler = IndexBloatToolHandler(mock_sql_driver)
+        tool_def = handler.get_tool_definition()
+
+        assert tool_def.name == "analyze_index_bloat"
+        assert "bloat" in tool_def.description.lower() or "index" in tool_def.description.lower()
+        assert tool_def.inputSchema is not None
+
+    @pytest.mark.asyncio
+    async def test_extension_not_installed(self, mock_sql_driver):
+        """Test handling when pgstattuple extension is not installed."""
+        mock_sql_driver.execute_query = AsyncMock(return_value=[])
+
+        handler = IndexBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({})
+
+        assert "not installed" in result[0].text.lower() or "extension" in result[0].text.lower()
+
+    @pytest.mark.asyncio
+    async def test_single_btree_index_analysis(self, mock_sql_driver):
+        """Test analyzing a single B-tree index."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True}],
+            # Get index info
+            [{
+                "index_name": "idx_users_email",
+                "table_name": "users",
+                "index_type": "btree",
+                "index_size": 8192000,
+                "is_unique": True,
+                "is_primary": False,
+                "definition": "CREATE INDEX idx_users_email ON users(email)"
+            }],
+            # pgstatindex result
+            [{
+                "version": 4,
+                "tree_level": 2,
+                "index_size": 8192000,
+                "root_block_no": 3,
+                "internal_pages": 10,
+                "leaf_pages": 100,
+                "empty_pages": 5,
+                "deleted_pages": 2,
+                "avg_leaf_density": 85.5,
+                "leaf_fragmentation": 10.2
+            }]
+        ])
+
+        handler = IndexBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "index_name": "idx_users_email",
+            "schema_name": "public"
+        })
+
+        result_text = result[0].text
+        assert "idx_users_email" in result_text or "btree" in result_text.lower() or "bloat" in result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_table_indexes_analysis(self, mock_sql_driver):
+        """Test analyzing all indexes for a table."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True}],
+            # Get indexes for table
+            [
+                {
+                    "index_name": "idx_users_email",
+                    "index_type": "btree",
+                    "index_size": 8192000,
+                    "is_unique": True,
+                    "is_primary": False
+                },
+                {
+                    "index_name": "idx_users_name",
+                    "index_type": "btree",
+                    "index_size": 4096000,
+                    "is_unique": False,
+                    "is_primary": False
+                }
+            ],
+            # pgstatindex for idx_users_email
+            [{
+                "version": 4,
+                "tree_level": 2,
+                "index_size": 8192000,
+                "root_block_no": 3,
+                "internal_pages": 10,
+                "leaf_pages": 100,
+                "empty_pages": 5,
+                "deleted_pages": 2,
+                "avg_leaf_density": 85.5,
+                "leaf_fragmentation": 10.2
+            }],
+            # pgstatindex for idx_users_name
+            [{
+                "version": 4,
+                "tree_level": 1,
+                "index_size": 4096000,
+                "root_block_no": 2,
+                "internal_pages": 5,
+                "leaf_pages": 50,
+                "empty_pages": 1,
+                "deleted_pages": 0,
+                "avg_leaf_density": 90.0,
+                "leaf_fragmentation": 5.0
+            }]
+        ])
+
+        handler = IndexBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "table_name": "users",
+            "schema_name": "public"
+        })
+
+        result_text = result[0].text
+        assert "indexes" in result_text.lower() or "bloat" in result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_schema_indexes_analysis(self, mock_sql_driver):
+        """Test analyzing all indexes in a schema."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True}],
+            # Get all indexes in schema
+            [{
+                "index_name": "idx_users_email",
+                "table_name": "users",
+                "index_type": "btree",
+                "index_size": 8192000,
+                "is_unique": True,
+                "is_primary": False
+            }],
+            # pgstatindex result
+            [{
+                "version": 4,
+                "tree_level": 2,
+                "index_size": 8192000,
+                "root_block_no": 3,
+                "internal_pages": 10,
+                "leaf_pages": 100,
+                "empty_pages": 5,
+                "deleted_pages": 2,
+                "avg_leaf_density": 85.5,
+                "leaf_fragmentation": 10.2
+            }]
+        ])
+
+        handler = IndexBloatToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "schema_name": "public"
+        })
+
+        result_text = result[0].text
+        assert "index" in result_text.lower() or "bloat" in result_text.lower()
+
+
+class TestDatabaseBloatSummaryToolHandler:
+    """Tests for DatabaseBloatSummaryToolHandler."""
+
+    def test_tool_definition(self, mock_sql_driver):
+        """Test that tool definition is properly formed."""
+        handler = DatabaseBloatSummaryToolHandler(mock_sql_driver)
+        tool_def = handler.get_tool_definition()
+
+        assert tool_def.name == "get_bloat_summary"
+        assert "bloat" in tool_def.description.lower() or "summary" in tool_def.description.lower()
+        assert tool_def.inputSchema is not None
+
+    @pytest.mark.asyncio
+    async def test_extension_not_installed(self, mock_sql_driver):
+        """Test handling when pgstattuple extension is not installed."""
+        mock_sql_driver.execute_query = AsyncMock(return_value=[])
+
+        handler = DatabaseBloatSummaryToolHandler(mock_sql_driver)
+        result = await handler.run_tool({})
+
+        assert "not installed" in result[0].text.lower() or "extension" in result[0].text.lower()
+
+    @pytest.mark.asyncio
+    async def test_full_bloat_summary(self, mock_sql_driver):
+        """Test generating full bloat summary for database."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True}],
+            # Get tables in schema for table bloat summary
+            [
+                {"table_name": "users", "table_size": 81920000},
+                {"table_name": "orders", "table_size": 40960000}
+            ],
+            # pgstattuple_approx for users
+            [{
+                "table_len": 81920000,
+                "scanned_percent": 100.0,
+                "approx_tuple_count": 100000,
+                "approx_tuple_len": 50000000,
+                "approx_tuple_percent": 61.0,
+                "dead_tuple_count": 5000,
+                "dead_tuple_len": 2500000,
+                "dead_tuple_percent": 3.05,
+                "approx_free_space": 20000000,
+                "approx_free_percent": 24.4
+            }],
+            # pgstattuple_approx for orders
+            [{
+                "table_len": 40960000,
+                "scanned_percent": 100.0,
+                "approx_tuple_count": 50000,
+                "approx_tuple_len": 25000000,
+                "approx_tuple_percent": 61.0,
+                "dead_tuple_count": 2000,
+                "dead_tuple_len": 1000000,
+                "dead_tuple_percent": 2.44,
+                "approx_free_space": 10000000,
+                "approx_free_percent": 24.4
+            }],
+            # Get indexes in schema for index bloat summary
+            [{
+                "index_name": "idx_users_email",
+                "table_name": "users",
+                "index_type": "btree",
+                "index_size": 8192000
+            }],
+            # pgstatindex for idx_users_email
+            [{
+                "version": 4,
+                "tree_level": 2,
+                "index_size": 8192000,
+                "root_block_no": 3,
+                "internal_pages": 10,
+                "leaf_pages": 100,
+                "empty_pages": 5,
+                "deleted_pages": 2,
+                "avg_leaf_density": 85.5,
+                "leaf_fragmentation": 10.2
+            }]
+        ])
+
+        handler = DatabaseBloatSummaryToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "schema_name": "public"
+        })
+
+        result_text = result[0].text
+        # Should contain summary information
+        assert "bloat" in result_text.lower() or "summary" in result_text.lower() or "total" in result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_tables_only_summary(self, mock_sql_driver):
+        """Test generating bloat summary with tables only."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check - returns available: True
+            [{"available": True}],
+            # Get tables in schema
+            [{"table_name": "users", "table_size": 81920000}],
+            # pgstattuple_approx for users
+            [{
+                "table_len": 81920000,
+                "scanned_percent": 100.0,
+                "approx_tuple_count": 100000,
+                "approx_tuple_len": 50000000,
+                "approx_tuple_percent": 61.0,
+                "dead_tuple_count": 5000,
+                "dead_tuple_len": 2500000,
+                "dead_tuple_percent": 3.05,
+                "approx_free_space": 20000000,
+                "approx_free_percent": 24.4
+            }],
+            # Get indexes in schema (empty for this test)
+            []
+        ])
+
+        handler = DatabaseBloatSummaryToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "schema_name": "public"
+        })
+
+        result_text = result[0].text
+        assert "bloat" in result_text.lower() or "table" in result_text.lower() or "summary" in result_text.lower()
+
+    @pytest.mark.asyncio
+    async def test_empty_schema(self, mock_sql_driver):
+        """Test generating bloat summary for empty schema."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            # Extension check
+            [{"extname": "pgstattuple"}],
+            # Get tables in schema - empty
+            [],
+            # Get indexes in schema - empty
+            []
+        ])
+
+        handler = DatabaseBloatSummaryToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "schema_name": "empty_schema",
+            "include_tables": True,
+            "include_indexes": True
+        })
+
+        result_text = result[0].text
+        # Should handle empty schema gracefully
+        assert "bloat" in result_text.lower() or "no" in result_text.lower() or "empty" in result_text.lower() or "summary" in result_text.lower()

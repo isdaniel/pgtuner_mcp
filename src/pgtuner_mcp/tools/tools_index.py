@@ -32,6 +32,9 @@ that would improve performance. Uses a sophisticated analysis algorithm that:
 4. If HypoPG is available, tests indexes without creating them
 5. Uses a greedy optimization algorithm to select the best index set
 
+Note: This tool focuses on user/client tables only and excludes system
+catalog tables (pg_catalog, information_schema, pg_toast).
+
 The recommendations consider:
 - Query frequency and total execution time
 - Estimated improvement from each index
@@ -619,6 +622,10 @@ class UnusedIndexesToolHandler(ToolHandler):
     open_world_hint = False
     description = """Find indexes that are not being used or are duplicates.
 
+Note: This tool analyzes only user/client indexes and excludes system
+catalog indexes (pg_catalog, information_schema, pg_toast). It focuses
+on your application's custom tables only.
+
 Identifies:
 - Indexes with zero or very few scans since last stats reset
 - Duplicate indexes (same columns in same order)
@@ -666,6 +673,7 @@ Removing unused indexes can:
             min_size_mb = arguments.get("min_size_mb", 0)
             include_duplicates = arguments.get("include_duplicates", True)
 
+            # Query only user indexes, excluding system schemas
             unused_query = """
                 SELECT
                     s.schemaname,
@@ -681,6 +689,7 @@ Removing unused indexes can:
                 FROM pg_stat_user_indexes s
                 JOIN pg_stat_user_tables t ON s.relid = t.relid
                 WHERE s.schemaname = %s
+                  AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                   AND pg_relation_size(s.indexrelid) >= %s * 1024 * 1024
                   AND s.indexrelname NOT LIKE '%%_pkey'
                   AND s.idx_scan = 0
@@ -701,7 +710,7 @@ Removing unused indexes can:
                 )
             }
 
-            # Find duplicate/overlapping indexes
+            # Find duplicate/overlapping indexes (user tables only)
             if include_duplicates:
                 duplicate_query = """
                     WITH index_cols AS (
@@ -719,6 +728,7 @@ Removing unused indexes can:
                         CROSS JOIN unnest(x.indkey) WITH ORDINALITY AS k(attnum, n)
                         JOIN pg_attribute a ON a.attrelid = t.oid AND a.attnum = k.attnum
                         WHERE n.nspname = %s
+                          AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                         GROUP BY n.nspname, t.relname, i.relname, i.oid
                     )
                     SELECT
