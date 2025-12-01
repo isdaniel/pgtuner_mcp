@@ -52,6 +52,11 @@ except ImportError:
 # Import tool handlers
 from .services import DbConnPool, HypoPGService, IndexAdvisor, SqlDriver
 from .tools.toolhandler import ToolHandler
+from .tools.tools_bloat import (
+    DatabaseBloatSummaryToolHandler,
+    IndexBloatToolHandler,
+    TableBloatToolHandler,
+)
 from .tools.tools_health import (
     ActiveQueriesToolHandler,
     DatabaseHealthToolHandler,
@@ -155,6 +160,11 @@ def register_all_tools() -> None:
     add_tool_handler(ActiveQueriesToolHandler(driver))
     add_tool_handler(WaitEventsToolHandler(driver))
     add_tool_handler(DatabaseSettingsToolHandler(driver))
+
+    # Bloat detection tools (using pgstattuple extension)
+    add_tool_handler(TableBloatToolHandler(driver))
+    add_tool_handler(IndexBloatToolHandler(driver))
+    add_tool_handler(DatabaseBloatSummaryToolHandler(driver))
 
     logger.info(f"Registered {len(tool_handlers)} tool handlers")
 
@@ -701,7 +711,8 @@ RESOURCE_TEMPLATES: list[ResourceTemplate] = [
         uriTemplate="pgtuner://table/{schema}/{table_name}/stats",
         name="Table Statistics",
         title="Table Statistics Resource",
-        description="Get detailed statistics for a specific table including size, row counts, and access patterns. "
+        description="Get detailed statistics for a specific user/client table including size, row counts, and access patterns. "
+                    "Note: This resource only provides data for user tables, not system tables. "
                     "Parameters: schema (e.g., 'public'), table_name (e.g., 'users')",
         mimeType="application/json"
     ),
@@ -709,7 +720,8 @@ RESOURCE_TEMPLATES: list[ResourceTemplate] = [
         uriTemplate="pgtuner://table/{schema}/{table_name}/indexes",
         name="Table Indexes",
         title="Table Index Information",
-        description="Get all indexes defined on a specific table with usage statistics. "
+        description="Get all indexes defined on a specific user/client table with usage statistics. "
+                    "Note: This resource only provides data for user table indexes, not system table indexes. "
                     "Parameters: schema (e.g., 'public'), table_name (e.g., 'orders')",
         mimeType="application/json"
     ),
@@ -733,7 +745,8 @@ RESOURCE_TEMPLATES: list[ResourceTemplate] = [
         uriTemplate="pgtuner://health/{check_type}",
         name="Health Check",
         title="Database Health Check",
-        description="Get specific health check information. "
+        description="Get specific health check information focused on user/client tables and operations. "
+                    "System tables are excluded from analysis. "
                     "Parameters: check_type (one of: connections, cache, locks, replication, bloat, all)",
         mimeType="application/json"
     ),
@@ -1265,12 +1278,17 @@ def _get_tools_documentation() -> str:
 ## Overview
 pgtuner-mcp provides a comprehensive set of tools for PostgreSQL performance tuning and monitoring.
 
+**Important Note**: All tools in this MCP server focus exclusively on user/client tables and indexes.
+System catalog tables (pg_catalog, information_schema, pg_toast) are automatically excluded from
+all analyses. This ensures the tools focus on optimizing your application's custom database objects.
+
 ## Performance Analysis Tools
 
 ### get_slow_queries
 Retrieve slow queries from PostgreSQL using pg_stat_statements.
 - **Parameters**: limit, min_calls, min_total_time_ms, order_by
 - **Use case**: Identify queries that need optimization
+- **Note**: System catalog queries are excluded
 
 ### analyze_query
 Analyze a SQL query's execution plan and performance characteristics.
@@ -1279,9 +1297,10 @@ Analyze a SQL query's execution plan and performance characteristics.
 - **Warning**: With analyze=true, the query is actually executed
 
 ### get_table_stats
-Get detailed statistics for database tables including size, row counts, and access patterns.
+Get detailed statistics for user/client database tables including size, row counts, and access patterns.
 - **Parameters**: schema_name, table_name, include_indexes, order_by
 - **Use case**: Identify tables needing maintenance or optimization
+- **Note**: Only analyzes user tables, excludes system tables
 
 ## Index Tuning Tools
 
@@ -1289,6 +1308,7 @@ Get detailed statistics for database tables including size, row counts, and acce
 Get AI-powered index recommendations based on query workload analysis.
 - **Parameters**: workload_queries, max_recommendations, min_improvement_percent, include_hypothetical_testing, target_tables
 - **Use case**: Find missing indexes that would improve performance
+- **Note**: Only analyzes user/client tables
 
 ### explain_with_indexes
 Run EXPLAIN on a query with optional hypothetical indexes (requires HypoPG).
@@ -1302,9 +1322,10 @@ Manage HypoPG hypothetical indexes for testing.
 - **Use case**: Create and manage temporary test indexes
 
 ### find_unused_indexes
-Find indexes that are not being used or are duplicates.
+Find user/client indexes that are not being used or are duplicates.
 - **Parameters**: schema_name, min_size_mb, max_scan_ratio, include_duplicates
 - **Use case**: Identify indexes that can be safely dropped
+- **Note**: Only analyzes user indexes, excludes system indexes
 
 ## Database Health Tools
 
@@ -1313,22 +1334,50 @@ Perform a comprehensive database health check.
 - **Parameters**: include_recommendations, verbose
 - **Checks**: Connections, cache ratios, locks, replication, wraparound, disk usage, checkpoints
 - **Use case**: Overall database health assessment
+- **Note**: Focuses on user tables for bloat and cache analysis
 
 ### get_active_queries
 Get information about currently active queries and connections.
 - **Parameters**: min_duration_seconds, include_idle, include_system, database
 - **Use case**: Monitor running queries and detect issues
+- **Note**: By default excludes system processes and catalog queries
 
 ### analyze_wait_events
 Analyze PostgreSQL wait events to identify bottlenecks.
 - **Parameters**: active_only
 - **Use case**: Identify I/O, lock, or CPU bottlenecks
+- **Note**: Focuses on client backend processes
 
 ### review_settings
 Review PostgreSQL configuration settings and get recommendations.
 - **Parameters**: category, include_all_settings
 - **Categories**: all, memory, checkpoint, wal, autovacuum, connections
 - **Use case**: Configuration optimization
+
+## Bloat Detection Tools (pgstattuple)
+
+These tools use the pgstattuple extension to detect table and index bloat.
+Requires: CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+### analyze_table_bloat
+Analyze table bloat using pgstattuple to get accurate tuple-level statistics.
+- **Parameters**: table_name, schema_name, use_approx, min_table_size_mb, include_toast
+- **Output**: Dead tuple counts, free space, wasted space percentage
+- **Use case**: Identify tables needing VACUUM or VACUUM FULL
+- **Note**: use_approx=true uses pgstattuple_approx for faster analysis on large tables
+
+### analyze_index_bloat
+Analyze B-tree index bloat using pgstatindex.
+- **Parameters**: index_name, table_name, schema_name, min_index_size_mb, min_bloat_percent
+- **Output**: Leaf density, fragmentation, empty/deleted pages
+- **Use case**: Identify indexes needing REINDEX
+- **Supports**: B-tree (pgstatindex), GIN (pgstatginindex), Hash (pgstathashindex)
+
+### get_bloat_summary
+Get a comprehensive overview of database bloat across tables and indexes.
+- **Parameters**: schema_name, top_n, min_size_mb
+- **Output**: Top bloated tables, top bloated indexes, total reclaimable space, priority actions
+- **Use case**: Quick assessment of database maintenance needs
 """
     return docs
 
@@ -1435,6 +1484,44 @@ def _get_workflows_documentation() -> str:
    - Create recommended indexes
    - Re-run analyze_query with analyze=true
    - Monitor pg_stat_statements
+
+## Workflow 5: Bloat Detection and Cleanup
+
+This workflow uses the pgstattuple extension for accurate bloat detection.
+Prerequisite: CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+1. **Get bloat overview**
+   ```
+   Use: get_bloat_summary with schema_name="public", top_n=10
+   Review: Total reclaimable space and priority actions
+   ```
+
+2. **Analyze specific tables**
+   ```
+   Use: analyze_table_bloat with table_name="your_table"
+   Check: dead_tuple_percent and wasted_percent
+   For large tables: use_approx=true for faster analysis
+   ```
+
+3. **Analyze index bloat**
+   ```
+   Use: analyze_index_bloat with table_name="your_table"
+   Check: avg_leaf_density (< 70% indicates bloat)
+   Check: leaf_fragmentation percentage
+   ```
+
+4. **Maintenance actions**
+   - For tables with high dead tuples: VACUUM ANALYZE table_name;
+   - For tables with >30% wasted space: VACUUM FULL table_name; (requires exclusive lock)
+   - Alternative for online defrag: pg_repack -t schema.table_name
+   - For bloated indexes: REINDEX INDEX CONCURRENTLY index_name;
+
+5. **Prevent future bloat**
+   ```
+   Use: review_settings with category="autovacuum"
+   Consider: Tuning per-table autovacuum settings
+   ALTER TABLE table_name SET (autovacuum_vacuum_scale_factor = 0.1);
+   ```
 """
 
 

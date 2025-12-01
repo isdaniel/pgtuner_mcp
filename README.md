@@ -162,11 +162,13 @@ python -m pgtuner_mcp --mode streamable-http --debug
 
 ## Available Tools
 
+> **Note**: All tools focus exclusively on user/application tables and indexes. System catalog tables (`pg_catalog`, `information_schema`, `pg_toast`) are automatically excluded from all analyses.
+
 ### Performance Analysis Tools
 
 | Tool | Description |
 |------|-------------|
-| `get_slow_queries` | Retrieve slow queries from pg_stat_statements with detailed stats (total time, mean time, calls, cache hit ratio) |
+| `get_slow_queries` | Retrieve slow queries from pg_stat_statements with detailed stats (total time, mean time, calls, cache hit ratio). Excludes system catalog queries. |
 | `analyze_query` | Analyze a query's execution plan with EXPLAIN ANALYZE, including automated issue detection |
 | `get_table_stats` | Get detailed table statistics including size, row counts, dead tuples, and access patterns |
 
@@ -176,7 +178,7 @@ python -m pgtuner_mcp --mode streamable-http --debug
 |------|-------------|
 | `get_index_recommendations` | AI-powered index recommendations based on query workload analysis |
 | `explain_with_indexes` | Run EXPLAIN with hypothetical indexes to test improvements without creating real indexes |
-| `manage_hypothetical_indexes` | Create, list, drop, or reset HypoPG hypothetical indexes |
+| `manage_hypothetical_indexes` | Create, list, drop, or reset HypoPG hypothetical indexes. Supports hide/unhide existing indexes. |
 | `find_unused_indexes` | Find unused and duplicate indexes that can be safely dropped |
 
 ### Database Health Tools
@@ -184,9 +186,17 @@ python -m pgtuner_mcp --mode streamable-http --debug
 | Tool | Description |
 |------|-------------|
 | `check_database_health` | Comprehensive health check with scoring (connections, cache, locks, replication, wraparound, disk, checkpoints) |
-| `get_active_queries` | Monitor active queries, find long-running transactions and blocked queries |
-| `analyze_wait_events` | Analyze wait events to identify I/O, lock, or CPU bottlenecks |
+| `get_active_queries` | Monitor active queries, find long-running transactions and blocked queries. By default excludes system processes. |
+| `analyze_wait_events` | Analyze wait events to identify I/O, lock, or CPU bottlenecks. Focuses on client backend processes. |
 | `review_settings` | Review PostgreSQL settings by category with optimization recommendations |
+
+### Bloat Detection Tools (pgstattuple)
+
+| Tool | Description |
+|------|-------------|
+| `analyze_table_bloat` | Analyze table bloat using pgstattuple extension. Shows dead tuple counts, free space, and wasted space percentage. |
+| `analyze_index_bloat` | Analyze B-tree index bloat using pgstatindex. Shows leaf density, fragmentation, and empty/deleted pages. Also supports GIN and Hash indexes. |
+| `get_bloat_summary` | Get a comprehensive overview of database bloat with top bloated tables/indexes, total reclaimable space, and priority maintenance actions. |
 
 ### Tool Parameters
 
@@ -212,6 +222,25 @@ python -m pgtuner_mcp --mode streamable-http --debug
 #### check_database_health
 - `include_recommendations`: Include actionable recommendations (default: true)
 - `verbose`: Include detailed statistics (default: false)
+
+#### analyze_table_bloat
+- `table_name`: Name of a specific table to analyze (optional)
+- `schema_name`: Schema name (default: `public`)
+- `use_approx`: Use `pgstattuple_approx` for faster analysis on large tables (default: false)
+- `min_table_size_gb`: Minimum table size in GB to include in schema-wide scan (default: 5)
+- `include_toast`: Include TOAST table analysis (default: false)
+
+#### analyze_index_bloat
+- `index_name`: Name of a specific index to analyze (optional)
+- `table_name`: Analyze all indexes on this table (optional)
+- `schema_name`: Schema name (default: `public`)
+- `min_index_size_gb`: Minimum index size in GB to include (default: 5)
+- `min_bloat_percent`: Only show indexes with bloat above this percentage (default: 20)
+
+#### get_bloat_summary
+- `schema_name`: Schema to analyze (default: `public`)
+- `top_n`: Number of top bloated objects to show (default: 10)
+- `min_size_gb`: Minimum object size in GB to include (default: 5)
 
 ## MCP Prompts
 
@@ -296,6 +325,18 @@ CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
 
 -- Verify installation
 SELECT * FROM pg_stat_statements LIMIT 1;
+```
+
+### pgstattuple Extension
+
+The `pgstattuple` extension is **required** for bloat detection tools (`analyze_table_bloat`, `analyze_index_bloat`, `get_bloat_summary`). It provides functions to get tuple-level statistics for tables and indexes.
+
+```sql
+-- Create the extension
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+-- Verify installation
+SELECT * FROM pgstattuple('pg_class') LIMIT 1;
 ```
 
 ### Performance Impact Considerations

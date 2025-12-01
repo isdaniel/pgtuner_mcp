@@ -23,6 +23,9 @@ class DatabaseHealthToolHandler(ToolHandler):
     open_world_hint = False
     description = """Perform a comprehensive database health check.
 
+Note: This tool focuses on user/client tables and excludes PostgreSQL
+system tables (pg_catalog, information_schema, pg_toast) from analysis.
+
 Analyzes multiple aspects of PostgreSQL health:
 - Connection statistics and pool usage
 - Cache hit ratios (buffer and index)
@@ -415,6 +418,10 @@ class ActiveQueriesToolHandler(ToolHandler):
     open_world_hint = False
     description = """Get information about currently active queries and connections.
 
+Note: By default, this tool excludes system/background processes and focuses
+on client backend queries to help you analyze your application's query patterns.
+System catalog queries are filtered out unless explicitly requested.
+
 Shows:
 - All active queries and their duration
 - Idle transactions that may be holding locks
@@ -478,6 +485,9 @@ Useful for:
 
             if not include_system:
                 filters.append("backend_type = 'client backend'")
+                # Also exclude queries against system catalogs
+                filters.append("query NOT LIKE '%%pg_catalog%%'")
+                filters.append("query NOT LIKE '%%information_schema%%'")
 
             if database:
                 filters.append("datname = %s")
@@ -580,6 +590,9 @@ class WaitEventsToolHandler(ToolHandler):
     idempotent_hint = True
     open_world_hint = False
     description = """Analyze PostgreSQL wait events to identify bottlenecks.
+
+Note: This tool focuses on client backend processes and excludes system
+background processes to help identify bottlenecks in your application queries.
 
 Wait events indicate what processes are waiting for:
 - Lock: Waiting for locks on tables/rows

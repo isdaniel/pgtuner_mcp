@@ -11,7 +11,6 @@ from mcp.types import TextContent, Tool
 from ..services import SqlDriver
 from .toolhandler import ToolHandler
 
-
 class GetSlowQueriesToolHandler(ToolHandler):
     """Tool handler for retrieving slow queries from pg_stat_statements."""
 
@@ -25,6 +24,9 @@ class GetSlowQueriesToolHandler(ToolHandler):
 
 Returns the top N slowest queries ordered by total execution time.
 Requires the pg_stat_statements extension to be enabled.
+
+Note: This tool focuses on user/application queries only. System catalog
+queries (pg_catalog, information_schema, pg_toast) are automatically excluded.
 
 The results include:
 - Query text (normalized)
@@ -107,6 +109,7 @@ The results include:
 
             # Query pg_stat_statements for slow queries
             # Using pg_stat_statements columns available in PostgreSQL 13+
+            # Excludes system catalog queries to focus on user/application queries
             query = f"""
                 SELECT
                     queryid,
@@ -131,6 +134,9 @@ The results include:
                 WHERE calls >= %s
                   AND total_exec_time >= %s
                   AND query NOT LIKE '%%pg_stat_statements%%'
+                  AND query NOT LIKE '%%pg_catalog%%'
+                  AND query NOT LIKE '%%information_schema%%'
+                  AND query NOT LIKE '%%pg_toast%%'
                 ORDER BY {order_column} DESC
                 LIMIT %s
             """
@@ -406,7 +412,11 @@ class TableStatsToolHandler(ToolHandler):
     destructive_hint = False
     idempotent_hint = True
     open_world_hint = False
-    description = """Get detailed statistics for database tables.
+    description = """Get detailed statistics for user/client database tables.
+
+Note: This tool analyzes only user-created tables and excludes PostgreSQL
+system tables (pg_catalog, information_schema, pg_toast). This focuses
+the analysis on your application's custom tables.
 
 Returns information about:
 - Table size (data, indexes, total)
@@ -477,6 +487,7 @@ or have performance issues."""
                 table_filter = "AND c.relname ILIKE %s"
                 params.append(table_name)
 
+            # Query only user tables, explicitly excluding system schemas
             query = f"""
                 SELECT
                     c.relname as table_name,
@@ -514,6 +525,7 @@ or have performance issues."""
                 LEFT JOIN pg_stat_user_tables s ON s.relid = c.oid
                 WHERE c.relkind = 'r'
                   AND n.nspname = %s
+                  AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                   {table_filter}
                 ORDER BY {order_clause}
             """
