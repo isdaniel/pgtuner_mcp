@@ -50,7 +50,7 @@ except ImportError:
     HTTP_AVAILABLE = False
 
 # Import tool handlers
-from .services import DbConnPool, HypoPGService, IndexAdvisor, SqlDriver
+from .services import DbConnPool, HypoPGService, IndexAdvisor, SqlDriver, get_user_filter
 from .tools.toolhandler import ToolHandler
 from .tools.tools_bloat import (
     DatabaseBloatSummaryToolHandler,
@@ -508,7 +508,7 @@ def _generate_prompt_messages(prompt_name: str, args: dict[str, str]) -> list[Pr
 **Task**: Analyze slow queries and provide optimization recommendations.
 
 **Steps to follow**:
-1. First, use the `get_slow_queries` tool with min_total_time_ms={min_duration} and limit={limit}
+1. First, use the `get_slow_queries` tool with min_mean_time_ms={min_duration} and limit={limit}
 2. For the top slowest queries, use `analyze_query` to examine their execution plans
 3. Use `get_index_recommendations` to find potential index improvements
 4. Check table statistics with `get_table_stats` for tables involved in slow queries
@@ -976,7 +976,11 @@ async def _get_query_stats_resource(query_hash: str) -> str:
 
     driver = get_sql_driver()
 
-    query = """
+    # Get user filter for excluding specific user IDs
+    user_filter = get_user_filter()
+    statements_filter = user_filter.get_statements_filter()
+
+    query = f"""
         SELECT
             queryid,
             query,
@@ -997,6 +1001,7 @@ async def _get_query_stats_resource(query_hash: str) -> str:
             temp_blks_written
         FROM pg_stat_statements
         WHERE queryid::text = %s
+          {statements_filter}
     """
 
     try:
@@ -1106,8 +1111,12 @@ async def _get_health_resource(check_type: str) -> str:
 
     driver = get_sql_driver()
 
+    # Get user filter for excluding specific user IDs
+    user_filter = get_user_filter()
+    activity_filter = user_filter.get_activity_filter()
+
     if check_type == "connections":
-        query = """
+        query = f"""
             SELECT
                 count(*) as total_connections,
                 count(*) FILTER (WHERE state = 'active') as active,
@@ -1117,6 +1126,7 @@ async def _get_health_resource(check_type: str) -> str:
                 (SELECT setting::int FROM pg_settings WHERE name = 'max_connections') as max_connections
             FROM pg_stat_activity
             WHERE backend_type = 'client backend'
+              {activity_filter}
         """
         result = await driver.execute_query(query)
         row = result[0]
@@ -1286,7 +1296,7 @@ all analyses. This ensures the tools focus on optimizing your application's cust
 
 ### get_slow_queries
 Retrieve slow queries from PostgreSQL using pg_stat_statements.
-- **Parameters**: limit, min_calls, min_total_time_ms, order_by
+- **Parameters**: limit, min_calls, min_mean_time_ms, order_by
 - **Use case**: Identify queries that need optimization
 - **Note**: System catalog queries are excluded
 
@@ -1390,7 +1400,7 @@ def _get_workflows_documentation() -> str:
 
 1. **Identify slow queries**
    ```
-   Use: get_slow_queries with limit=10, order_by="total_time"
+   Use: get_slow_queries with limit=10, order_by="mean_time"
    ```
 
 2. **Analyze execution plans**

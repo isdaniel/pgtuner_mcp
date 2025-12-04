@@ -75,8 +75,35 @@ pip install -e .
 | Variable | Description | Required |
 |----------|-------------|----------|
 | `DATABASE_URI` | PostgreSQL connection string | Yes |
+| `PGTUNER_EXCLUDE_USERIDS` | Comma-separated list of user IDs (OIDs) to exclude from monitoring | No |
 
 **Connection String Format:** `postgresql://user:password@host:port/database`
+
+### Excluding Specific Users from Monitoring
+
+You can exclude specific PostgreSQL users from being included in query analysis and monitoring results. This is useful for filtering out:
+- Monitoring or replication users
+- System accounts
+- Internal application service accounts
+
+Set the `PGTUNER_EXCLUDE_USERIDS` environment variable with a comma-separated list of user OIDs:
+
+```bash
+# Exclude user IDs 16384, 16385, and 16386
+export PGTUNER_EXCLUDE_USERIDS="16384,16385,16386"
+```
+
+To find the OID for a specific PostgreSQL user:
+
+```sql
+SELECT usesysid, usename FROM pg_user WHERE usename = 'monitoring_user';
+```
+
+When configured, the following queries are filtered:
+- `pg_stat_activity` queries (filters on `usesysid` column)
+- `pg_stat_statements` queries (filters on `userid` column)
+
+This affects tools like `get_slow_queries`, `get_active_queries`, `analyze_wait_events`, `check_database_health`, and `get_index_recommendations`.
 
 ### MCP Client Configuration
 
@@ -125,6 +152,8 @@ python -m pgtuner_mcp --mode stdio
 
 ### 2. HTTP SSE Mode (Legacy Web Applications)
 
+The SSE (Server-Sent Events) mode provides a web-based transport for MCP communication. It's useful for web applications and clients that need HTTP-based communication.
+
 ```bash
 # Start SSE server on default host/port (0.0.0.0:8080)
 python -m pgtuner_mcp --mode sse
@@ -134,6 +163,28 @@ python -m pgtuner_mcp --mode sse --host localhost --port 3000
 
 # Enable debug mode
 python -m pgtuner_mcp --mode sse --debug
+```
+
+**SSE Endpoints:**
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/sse` | GET | SSE connection endpoint - clients connect here to receive server events |
+| `/messages` | POST | Send messages/requests to the server |
+
+**MCP Client Configuration for SSE:**
+
+For MCP clients that support SSE transport (like Claude Desktop or custom clients):
+
+```json
+{
+  "mcpServers": {
+    "pgtuner_mcp": {
+      "type": "sse",
+      "url": "http://localhost:8080/sse"
+    }
+  }
+}
 ```
 
 ### 3. Streamable HTTP Mode (Modern MCP Protocol - Recommended)
@@ -203,8 +254,8 @@ python -m pgtuner_mcp --mode streamable-http --debug
 #### get_slow_queries
 - `limit`: Maximum queries to return (default: 10)
 - `min_calls`: Minimum call count filter (default: 1)
-- `min_total_time_ms`: Minimum total execution time filter
-- `order_by`: Sort by `total_time`, `mean_time`, `calls`, or `rows`
+- `min_mean_time_ms`: Minimum mean (average) execution time in milliseconds filter
+- `order_by`: Sort by `mean_time`, `calls`, or `rows`
 
 #### analyze_query
 - `query` (required): SQL query to analyze

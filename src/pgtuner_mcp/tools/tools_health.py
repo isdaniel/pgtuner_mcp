@@ -8,7 +8,7 @@ from typing import Any
 
 from mcp.types import TextContent, Tool
 
-from ..services import SqlDriver
+from ..services import SqlDriver, get_user_filter
 from .toolhandler import ToolHandler
 
 
@@ -117,7 +117,10 @@ Returns a health score with detailed breakdown and recommendations."""
 
     async def _check_connections(self, health: dict) -> None:
         """Check connection statistics."""
-        query = """
+        user_filter = get_user_filter()
+        activity_filter = user_filter.get_activity_filter()
+
+        query = f"""
             SELECT
                 max_conn,
                 used,
@@ -132,6 +135,7 @@ Returns a health score with detailed breakdown and recommendations."""
                 SELECT
                     COUNT(*) as used
                 FROM pg_stat_activity
+                WHERE 1=1 {activity_filter}
             ) u,
             (
                 SELECT
@@ -203,11 +207,15 @@ Returns a health score with detailed breakdown and recommendations."""
         result = await self.sql_driver.execute_query(query)
 
         # Check for blocking queries
-        blocking_query = """
+        user_filter = get_user_filter()
+        activity_filter = user_filter.get_activity_filter()
+
+        blocking_query = f"""
             SELECT COUNT(*) as blocking_count
             FROM pg_stat_activity
             WHERE wait_event_type = 'Lock'
               AND state = 'active'
+              {activity_filter}
         """
         blocking_result = await self.sql_driver.execute_query(blocking_query)
 
@@ -476,6 +484,10 @@ Useful for:
             include_system = arguments.get("include_system", False)
             database = arguments.get("database")
 
+            # Get user filter for excluding specific user IDs
+            user_filter = get_user_filter()
+            activity_filter = user_filter.get_activity_filter()
+
             # Build filters
             filters = []
             params = []
@@ -497,7 +509,13 @@ Useful for:
                 filters.append("EXTRACT(epoch FROM now() - query_start) >= %s")
                 params.append(min_duration)
 
-            where_clause = "WHERE " + " AND ".join(filters) if filters else ""
+            # Build where clause with user filter
+            where_parts = filters.copy()
+            if activity_filter:
+                # Remove leading "AND " from the filter
+                where_parts.append(activity_filter.lstrip("AND ").strip())
+
+            where_clause = "WHERE " + " AND ".join(where_parts) if where_parts else ""
 
             query = f"""
                 SELECT
@@ -521,19 +539,20 @@ Useful for:
 
             result = await self.sql_driver.execute_query(query, params if params else None)
 
-            # Get summary statistics
-            summary_query = """
+            # Get summary statistics (with user filter)
+            summary_query = f"""
                 SELECT
                     state,
                     COUNT(*) as count
                 FROM pg_stat_activity
                 WHERE backend_type = 'client backend'
+                  {activity_filter}
                 GROUP BY state
             """
             summary = await self.sql_driver.execute_query(summary_query)
 
-            # Find blocked queries
-            blocked_query = """
+            # Find blocked queries (with user filter)
+            blocked_query = f"""
                 SELECT
                     blocked.pid as blocked_pid,
                     blocked.query as blocked_query,
@@ -544,6 +563,7 @@ Useful for:
                 FROM pg_stat_activity blocked
                 JOIN pg_stat_activity blocking ON blocking.pid = ANY(pg_blocking_pids(blocked.pid))
                 WHERE blocked.wait_event_type = 'Lock'
+                  {activity_filter.replace('usesysid', 'blocked.usesysid') if activity_filter else ''}
                 LIMIT 10
             """
             blocked = await self.sql_driver.execute_query(blocked_query)
@@ -631,6 +651,10 @@ This helps identify:
         try:
             active_only = arguments.get("active_only", True)
 
+            # Get user filter for excluding specific user IDs
+            user_filter = get_user_filter()
+            activity_filter = user_filter.get_activity_filter()
+
             state_filter = "AND state = 'active'" if active_only else ""
 
             # Current wait events
@@ -644,6 +668,7 @@ This helps identify:
                 WHERE wait_event IS NOT NULL
                   AND backend_type = 'client backend'
                   {state_filter}
+                  {activity_filter}
                 GROUP BY wait_event_type, wait_event
                 ORDER BY count DESC
             """
@@ -659,6 +684,7 @@ This helps identify:
                 WHERE wait_event_type IS NOT NULL
                   AND backend_type = 'client backend'
                   {state_filter}
+                  {activity_filter}
                 GROUP BY wait_event_type
                 ORDER BY count DESC
             """
