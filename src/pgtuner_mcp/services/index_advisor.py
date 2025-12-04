@@ -19,6 +19,7 @@ except ImportError:
 
 from .hypopg_service import HypoPGService
 from .sql_driver import SqlDriver
+from .user_filter import get_user_filter
 
 logger = logging.getLogger(__name__)
 
@@ -245,6 +246,10 @@ class IndexAdvisor:
             result.error = f"Error checking pg_stat_statements: {e}"
             return result
 
+        # Get user filter for excluding specific user IDs
+        user_filter = get_user_filter()
+        statements_filter = user_filter.get_statements_filter()
+
         # Get top queries from pg_stat_statements (excluding system catalog queries)
         try:
             queries_result = await self.driver.execute_query(f"""
@@ -262,6 +267,7 @@ class IndexAdvisor:
                   AND query NOT LIKE '%pg_%'
                   AND query NOT LIKE '%$%'
                   AND query ~* '^\\s*(SELECT|UPDATE|DELETE)'
+                  {statements_filter}
                 ORDER BY total_exec_time DESC
                 LIMIT {limit}
             """)

@@ -8,7 +8,7 @@ from typing import Any
 
 from mcp.types import TextContent, Tool
 
-from ..services import SqlDriver
+from ..services import SqlDriver, get_user_filter
 from .toolhandler import ToolHandler
 
 class GetSlowQueriesToolHandler(ToolHandler):
@@ -22,7 +22,7 @@ class GetSlowQueriesToolHandler(ToolHandler):
     open_world_hint = False
     description = """Retrieve slow queries from PostgreSQL using pg_stat_statements.
 
-Returns the top N slowest queries ordered by total execution time.
+Returns the top N slowest queries ordered by mean (average) execution time.
 Requires the pg_stat_statements extension to be enabled.
 
 Note: This tool focuses on user/application queries only. System catalog
@@ -30,9 +30,9 @@ queries (pg_catalog, information_schema, pg_toast) are automatically excluded.
 
 The results include:
 - Query text (normalized)
-- Total execution time
 - Number of calls
-- Mean execution time
+- Mean execution time (average per call)
+- Min/Max execution time
 - Rows returned
 - Shared buffer hits/reads for cache analysis"""
 
@@ -59,16 +59,16 @@ The results include:
                         "default": 1,
                         "minimum": 1
                     },
-                    "min_total_time_ms": {
+                    "min_mean_time_ms": {
                         "type": "number",
-                        "description": "Minimum total execution time in milliseconds (default: 0)",
+                        "description": "Minimum mean (average) execution time in milliseconds (default: 0)",
                         "default": 0
                     },
                     "order_by": {
                         "type": "string",
                         "description": "Column to order results by",
-                        "enum": ["total_time", "mean_time", "calls", "rows"],
-                        "default": "total_time"
+                        "enum": ["mean_time", "calls", "rows"],
+                        "default": "mean_time"
                     }
                 },
                 "required": []
@@ -80,17 +80,16 @@ The results include:
         try:
             limit = arguments.get("limit", 10)
             min_calls = arguments.get("min_calls", 1)
-            min_total_time_ms = arguments.get("min_total_time_ms", 0)
-            order_by = arguments.get("order_by", "total_time")
+            min_mean_time_ms = arguments.get("min_mean_time_ms", 0)
+            order_by = arguments.get("order_by", "mean_time")
 
             # Map order_by to actual column names
             order_map = {
-                "total_time": "total_exec_time",
                 "mean_time": "mean_exec_time",
                 "calls": "calls",
                 "rows": "rows"
             }
-            order_column = order_map.get(order_by, "total_exec_time")
+            order_column = order_map.get(order_by, "mean_exec_time")
 
             # Check if pg_stat_statements is available
             check_query = """
@@ -107,6 +106,10 @@ The results include:
                     "Note: You may need to add it to shared_preload_libraries in postgresql.conf"
                 )
 
+            # Get user filter for excluding specific user IDs
+            user_filter = get_user_filter()
+            statements_filter = user_filter.get_statements_filter()
+
             # Query pg_stat_statements for slow queries
             # Using pg_stat_statements columns available in PostgreSQL 13+
             # Excludes system catalog queries to focus on user/application queries
@@ -115,7 +118,6 @@ The results include:
                     queryid,
                     LEFT(query, 500) as query_text,
                     calls,
-                    ROUND(total_exec_time::numeric, 2) as total_time_ms,
                     ROUND(mean_exec_time::numeric, 2) as mean_time_ms,
                     ROUND(min_exec_time::numeric, 2) as min_time_ms,
                     ROUND(max_exec_time::numeric, 2) as max_time_ms,
@@ -132,18 +134,19 @@ The results include:
                     temp_blks_written
                 FROM pg_stat_statements
                 WHERE calls >= %s
-                  AND total_exec_time >= %s
+                  AND mean_exec_time >= %s
                   AND query NOT LIKE '%%pg_stat_statements%%'
                   AND query NOT LIKE '%%pg_catalog%%'
                   AND query NOT LIKE '%%information_schema%%'
                   AND query NOT LIKE '%%pg_toast%%'
+                  {statements_filter}
                 ORDER BY {order_column} DESC
                 LIMIT %s
             """
 
             results = await self.sql_driver.execute_query(
                 query,
-                [min_calls, min_total_time_ms, limit]
+                [min_calls, min_mean_time_ms, limit]
             )
 
             if not results:
@@ -161,7 +164,7 @@ The results include:
                     "total_queries_returned": len(results),
                     "filters_applied": {
                         "min_calls": min_calls,
-                        "min_total_time_ms": min_total_time_ms,
+                        "min_mean_time_ms": min_mean_time_ms,
                         "order_by": order_by
                     }
                 },
