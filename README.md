@@ -79,6 +79,124 @@ pip install -e .
 
 **Connection String Format:** `postgresql://user:password@host:port/database`
 
+### Minimal User Permissions
+
+To run this MCP server, the PostgreSQL user requires specific permissions to query system catalogs and extensions. Below are the minimal permissions needed for different feature sets.
+
+#### Basic Permissions (Required for Core Functionality)
+
+```sql
+-- Create a dedicated monitoring user
+CREATE USER pgtuner_monitor WITH PASSWORD 'secure_password';
+
+-- Grant connection to the target database
+GRANT CONNECT ON DATABASE your_database TO pgtuner_monitor;
+
+-- Grant usage on schemas
+GRANT USAGE ON SCHEMA public TO pgtuner_monitor;
+GRANT USAGE ON SCHEMA pg_catalog TO pgtuner_monitor;
+
+-- Grant SELECT on user tables and indexes (for table stats and analysis)
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO pgtuner_monitor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO pgtuner_monitor;
+
+-- Grant access to system catalog views (read-only)
+GRANT pg_read_all_stats TO pgtuner_monitor;  -- PostgreSQL 10+
+```
+
+#### Extension-Specific Permissions
+
+**For pgstattuple (Bloat Detection):**
+
+```sql
+-- Create the extension (requires superuser or appropriate privileges)
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+
+-- Grant execution on pgstattuple functions
+GRANT EXECUTE ON FUNCTION pgstattuple(regclass) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION pgstattuple_approx(regclass) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION pgstatindex(regclass) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION pgstatginindex(regclass) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION pgstathashindex(regclass) TO pgtuner_monitor;
+
+-- Alternative: Use pg_stat_scan_tables role (PostgreSQL 14+)
+GRANT pg_stat_scan_tables TO pgtuner_monitor;
+```
+
+**For HypoPG (Hypothetical Index Testing):**
+
+```sql
+-- Create the extension (requires superuser or appropriate privileges)
+CREATE EXTENSION IF NOT EXISTS hypopg;
+
+-- Grant SELECT on HypoPG views
+GRANT SELECT ON hypopg_list_indexes TO pgtuner_monitor;
+GRANT SELECT ON hypopg_hidden_indexes TO pgtuner_monitor;
+
+-- Grant execution on HypoPG functions with proper signatures
+GRANT EXECUTE ON FUNCTION hypopg_create_index(text) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_drop_index(oid) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_reset() TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_hide_index(oid) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_unhide_index(oid) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_relation_size(oid) TO pgtuner_monitor;
+
+-- Note: HypoPG operations are session-scoped and don't affect the actual database
+```
+
+#### Complete Setup Script
+
+```sql
+-- 1. Create the monitoring user
+CREATE USER pgtuner_monitor WITH PASSWORD 'secure_password';
+
+-- 2. Grant connection and schema access
+GRANT CONNECT ON DATABASE your_database TO pgtuner_monitor;
+GRANT USAGE ON SCHEMA public TO pgtuner_monitor;
+
+-- 3. Grant read access to user tables
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO pgtuner_monitor;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO pgtuner_monitor;
+
+-- 4. Grant system statistics access
+GRANT pg_read_all_stats TO pgtuner_monitor;  -- PostgreSQL 10+
+
+-- Grant access to pg_stat_statements views explicitly
+GRANT SELECT ON pg_stat_statements TO pgtuner_monitor;
+GRANT SELECT ON pg_stat_statements_info TO pgtuner_monitor;
+
+-- 5. Install and grant access to extensions (as superuser)
+-- pg_stat_statements (required)
+CREATE EXTENSION IF NOT EXISTS pg_stat_statements;
+
+-- pgstattuple (for bloat detection)
+CREATE EXTENSION IF NOT EXISTS pgstattuple;
+GRANT pg_stat_scan_tables TO pgtuner_monitor;  -- PostgreSQL 14+
+-- OR grant individual functions:
+-- GRANT EXECUTE ON FUNCTION pgstattuple(regclass) TO pgtuner_monitor;
+-- GRANT EXECUTE ON FUNCTION pgstattuple_approx(regclass) TO pgtuner_monitor;
+-- GRANT EXECUTE ON FUNCTION pgstatindex(regclass) TO pgtuner_monitor;
+
+-- hypopg (for hypothetical index testing)
+CREATE EXTENSION IF NOT EXISTS hypopg;
+GRANT SELECT ON hypopg_list_indexes TO pgtuner_monitor;
+GRANT SELECT ON hypopg_hidden_indexes TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_create_index(text) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_drop_index(oid) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_reset() TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_hide_index(oid) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_unhide_index(oid) TO pgtuner_monitor;
+GRANT EXECUTE ON FUNCTION hypopg_relation_size(oid) TO pgtuner_monitor;
+
+-- 6. Verify permissions
+SET ROLE pgtuner_monitor;
+SELECT * FROM pg_stat_statements LIMIT 1;
+SELECT * FROM pg_stat_activity WHERE pid = pg_backend_pid();
+SELECT * FROM pgstattuple('pg_class') LIMIT 1;
+SELECT * FROM hypopg_list_indexes();
+RESET ROLE;
+```
+
 ### Excluding Specific Users from Monitoring
 
 You can exclude specific PostgreSQL users from being included in query analysis and monitoring results. This is useful for filtering out:

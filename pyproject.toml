@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pgtuner_mcp"
-version = "0.4.0"
+version = "0.4.1"
 authors = [
   { name = "DanielShih", email = "dog830228@gmail.com" },
 ]
@@ -36,7 +36,7 @@ packages = ["src/pgtuner_mcp"]
 pgtuner_mcp = "pgtuner_mcp:run"
 
 [project.urls]
-Source = "https://github.com/example/pgtuner_mcp"
+Source = "https://github.com/isdaniel/pgtuner_mcp"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
