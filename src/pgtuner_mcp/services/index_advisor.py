@@ -252,25 +252,28 @@ class IndexAdvisor:
 
         # Get top queries from pg_stat_statements (excluding system catalog queries)
         try:
-            queries_result = await self.driver.execute_query(f"""
+            # Build query with parameterized values to prevent SQL injection
+            base_query = r"""
                 SELECT
                     query,
                     calls,
                     mean_exec_time,
                     total_exec_time
                 FROM pg_stat_statements
-                WHERE calls >= {min_calls}
-                  AND mean_exec_time >= {min_avg_time_ms}
-                  AND query NOT LIKE '%pg_catalog%'
-                  AND query NOT LIKE '%information_schema%'
-                  AND query NOT LIKE '%pg_toast%'
-                  AND query NOT LIKE '%pg_%'
-                  AND query NOT LIKE '%$%'
-                  AND query ~* '^\\s*(SELECT|UPDATE|DELETE)'
-                  {statements_filter}
-                ORDER BY total_exec_time DESC
-                LIMIT {limit}
-            """)
+                WHERE calls >= %s
+                  AND mean_exec_time >= %s
+                  AND query NOT LIKE '%%pg_catalog%%'
+                  AND query NOT LIKE '%%information_schema%%'
+                  AND query NOT LIKE '%%pg_toast%%'
+                  AND query NOT LIKE '%%pg_%%'
+                  AND query NOT LIKE '%%$%%'
+                  AND query ~* '^\s*SELECT'
+            """
+            # statements_filter contains validated integer user IDs, safe to append
+            query = f"{base_query} {statements_filter} ORDER BY total_exec_time DESC LIMIT %s"
+            queries_result = await self.driver.execute_query(
+                query, [min_calls, min_avg_time_ms, limit]
+            )
 
             if not queries_result:
                 result.error = "No queries found matching criteria"
@@ -297,7 +300,8 @@ class IndexAdvisor:
         Returns:
             List of index information
         """
-        result = await self.driver.execute_query(f"""
+        result = await self.driver.execute_query(
+            """
             SELECT
                 i.relname as index_name,
                 am.amname as access_method,
@@ -312,9 +316,11 @@ class IndexAdvisor:
             JOIN pg_attribute a ON a.attrelid = t.oid
             JOIN LATERAL unnest(ix.indkey) WITH ORDINALITY AS x(attnum, ordinality)
                 ON a.attnum = x.attnum
-            WHERE t.relname = '{table}'
+            WHERE t.relname = %s
             GROUP BY i.relname, am.amname, ix.indisunique, ix.indisprimary, i.oid
-        """)
+            """,
+            [table]
+        )
 
         if not result:
             return []
@@ -343,7 +349,8 @@ class IndexAdvisor:
 
         # Find duplicate indexes
         try:
-            dup_result = await self.driver.execute_query(f"""
+            dup_result = await self.driver.execute_query(
+                """
                 SELECT
                     pg_size_pretty(sum(pg_relation_size(idx))::bigint) as size,
                     array_agg(idx) as indexes,
@@ -355,11 +362,13 @@ class IndexAdvisor:
                         indrelid::regclass as tbl,
                         indkey::text as key
                     FROM pg_index
-                    WHERE indrelid::regclass::text LIKE '{schema}.%%'
+                    WHERE indrelid::regclass::text LIKE %s || '.%%'
                 ) sub
                 GROUP BY tbl, key
                 HAVING count(*) > 1
-            """)
+                """,
+                [schema]
+            )
             if dup_result:
                 health["duplicate_indexes"] = dup_result
         except Exception as e:
@@ -367,7 +376,8 @@ class IndexAdvisor:
 
         # Find unused indexes (user tables only, exclude system schemas)
         try:
-            unused_result = await self.driver.execute_query(f"""
+            unused_result = await self.driver.execute_query(
+                """
                 SELECT
                     schemaname,
                     relname as table_name,
@@ -375,12 +385,14 @@ class IndexAdvisor:
                     idx_scan as scans,
                     pg_size_pretty(pg_relation_size(indexrelid)) as size
                 FROM pg_stat_user_indexes
-                WHERE schemaname = '{schema}'
+                WHERE schemaname = %s
                   AND schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                   AND idx_scan = 0
                   AND indexrelname NOT LIKE '%%_pkey'
                 ORDER BY pg_relation_size(indexrelid) DESC
-            """)
+                """,
+                [schema]
+            )
             if unused_result:
                 health["unused_indexes"] = unused_result
         except Exception as e:
@@ -410,6 +422,10 @@ class IndexAdvisor:
         """
         Extract table and column information from a query.
 
+        Uses pglast to parse the SQL query and extract referenced tables and columns.
+        This is particularly useful for identifying columns used in WHERE, JOIN,
+        ORDER BY, and GROUP BY clauses.
+
         Args:
             query: SQL query
 
@@ -422,34 +438,118 @@ class IndexAdvisor:
 
         try:
             parsed = parse_sql(query)
+            if not parsed:
+                logger.debug("No statements found in query")
+                return {}
+
             columns_by_table: dict[str, set[str]] = {}
+            table_aliases: dict[str, str] = {}  # alias -> table name
 
-            # Simple extraction - this could be enhanced
+            # Extract tables and their aliases, then columns
             for stmt in parsed:
-                self._extract_from_node(stmt, columns_by_table)
+                self._extract_tables_from_node(stmt, table_aliases)
+                self._extract_columns_from_node(stmt, columns_by_table, table_aliases)
 
-            return {t: list(c) for t, c in columns_by_table.items()}
+            return {t: list(c) for t, c in columns_by_table.items() if c}
         except Exception as e:
-            logger.warning(f"Could not parse query: {e}")
+            logger.warning(f"Could not parse query for column extraction: {e}")
             return {}
 
-    def _extract_from_node(self, node: Any, columns: dict[str, set[str]]) -> None:
-        """Recursively extract column references from AST node."""
+    def _extract_tables_from_node(self, node: Any, table_aliases: dict[str, str]) -> None:
+        """
+        Recursively extract table names and their aliases from AST node.
+
+        Args:
+            node: AST node to process
+            table_aliases: Dictionary to populate with alias -> table name mappings
+        """
         if node is None:
             return
 
-        # Handle different node types based on node structure
+        node_class = type(node).__name__
 
+        # RangeVar represents a table reference
+        if node_class == "RangeVar":
+            table_name = getattr(node, "relname", None)
+            alias_node = getattr(node, "alias", None)
+            if table_name:
+                if alias_node:
+                    alias_name = getattr(alias_node, "aliasname", None)
+                    if alias_name:
+                        table_aliases[alias_name] = table_name
+                # Also map table name to itself for non-aliased references
+                table_aliases[table_name] = table_name
+
+        # Recursively process child nodes
         if hasattr(node, "__dict__"):
             for key, value in node.__dict__.items():
                 if key.startswith("_"):
                     continue
-
                 if isinstance(value, (list, tuple)):
                     for item in value:
-                        self._extract_from_node(item, columns)
+                        self._extract_tables_from_node(item, table_aliases)
                 else:
-                    self._extract_from_node(value, columns)
+                    self._extract_tables_from_node(value, table_aliases)
+
+    def _extract_columns_from_node(
+        self, node: Any, columns: dict[str, set[str]], table_aliases: dict[str, str]
+    ) -> None:
+        """
+        Recursively extract column references from AST node.
+
+        Args:
+            node: AST node to process
+            columns: Dictionary to populate with table -> column set mappings
+            table_aliases: Dictionary of alias -> table name mappings
+        """
+        if node is None:
+            return
+
+        node_class = type(node).__name__
+
+        # ColumnRef represents a column reference (e.g., table.column or just column)
+        if node_class == "ColumnRef":
+            fields = getattr(node, "fields", None)
+            if fields:
+                # Fields can be: (column,) or (table/alias, column)
+                field_names = []
+                for f in fields:
+                    f_class = type(f).__name__
+                    if f_class == "String":
+                        field_names.append(getattr(f, "sval", ""))
+                    elif f_class == "A_Star":
+                        # SELECT * - skip this
+                        return
+
+                if len(field_names) == 2:
+                    # table.column or alias.column
+                    table_or_alias, col_name = field_names
+                    table_name = table_aliases.get(table_or_alias, table_or_alias)
+                    if table_name and col_name:
+                        if table_name not in columns:
+                            columns[table_name] = set()
+                        columns[table_name].add(col_name)
+                elif len(field_names) == 1 and table_aliases:
+                    # Just column name - associate with first known table if only one
+                    col_name = field_names[0]
+                    # Get unique table names (not aliases)
+                    unique_tables = set(table_aliases.values())
+                    if len(unique_tables) == 1:
+                        table_name = list(unique_tables)[0]
+                        if table_name not in columns:
+                            columns[table_name] = set()
+                        columns[table_name].add(col_name)
+
+        # Recursively process child nodes
+        if hasattr(node, "__dict__"):
+            for key, value in node.__dict__.items():
+                if key.startswith("_"):
+                    continue
+                if isinstance(value, (list, tuple)):
+                    for item in value:
+                        self._extract_columns_from_node(item, columns, table_aliases)
+                else:
+                    self._extract_columns_from_node(value, columns, table_aliases)
 
     def _generate_candidate_indexes(
         self,

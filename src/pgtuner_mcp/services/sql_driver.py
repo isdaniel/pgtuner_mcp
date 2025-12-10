@@ -5,7 +5,6 @@ SQL Driver for PostgreSQL connections using psycopg connection pool.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -40,12 +39,6 @@ def obfuscate_password(connection_string: str | None) -> str | None:
         return connection_string
     except Exception:
         return "****"
-
-
-@dataclass
-class RowResult:
-    """Simple class to represent a row result from a query."""
-    cells: dict[str, Any]
 
 
 class DbConnPool:

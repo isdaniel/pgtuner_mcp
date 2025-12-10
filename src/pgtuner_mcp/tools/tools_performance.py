@@ -83,13 +83,16 @@ The results include:
             min_mean_time_ms = arguments.get("min_mean_time_ms", 0)
             order_by = arguments.get("order_by", "mean_time")
 
-            # Map order_by to actual column names
+            # Map order_by to actual column names (whitelist for SQL injection protection)
             order_map = {
                 "mean_time": "mean_exec_time",
                 "calls": "calls",
                 "rows": "rows"
             }
-            order_column = order_map.get(order_by, "mean_exec_time")
+            # Validate order_by against whitelist to prevent SQL injection
+            if order_by not in order_map:
+                order_by = "mean_time"
+            order_column = order_map[order_by]
 
             # Check if pg_stat_statements is available
             check_query = """
@@ -474,7 +477,7 @@ or have performance issues."""
             include_indexes = arguments.get("include_indexes", True)
             order_by = arguments.get("order_by", "size")
 
-            # Build the query
+            # Build the query with whitelist-validated order clause
             order_map = {
                 "size": "total_size DESC",
                 "rows": "n_live_tup DESC",
@@ -482,7 +485,10 @@ or have performance issues."""
                 "seq_scans": "seq_scan DESC",
                 "last_vacuum": "last_vacuum DESC NULLS LAST"
             }
-            order_clause = order_map.get(order_by, "total_size DESC")
+            # Validate order_by against whitelist to prevent SQL injection
+            if order_by not in order_map:
+                order_by = "size"
+            order_clause = order_map[order_by]
 
             table_filter = ""
             params = [schema_name]
