@@ -23,6 +23,17 @@ from .tools_performance import (
     GetSlowQueriesToolHandler,
     TableStatsToolHandler,
 )
+from .tools_query_history import (
+    QueryPlanHistoryToolHandler,
+    clear_plan_history,
+    get_plan_history,
+)
+from .tools_query_rewrite import (
+    QueryRewriteSuggestionsToolHandler,
+)
+from .tools_vacuum import (
+    VacuumProgressToolHandler,
+)
 
 __all__ = [
     "ToolHandler",
@@ -44,4 +55,12 @@ __all__ = [
     "TableBloatToolHandler",
     "IndexBloatToolHandler",
     "DatabaseBloatSummaryToolHandler",
+    # Query plan history tools
+    "QueryPlanHistoryToolHandler",
+    "get_plan_history",
+    "clear_plan_history",
+    # Vacuum monitoring tools
+    "VacuumProgressToolHandler",
+    # Query rewrite tools
+    "QueryRewriteSuggestionsToolHandler",
 ]

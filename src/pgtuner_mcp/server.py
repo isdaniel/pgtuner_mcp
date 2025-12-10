@@ -74,6 +74,15 @@ from .tools.tools_performance import (
     GetSlowQueriesToolHandler,
     TableStatsToolHandler,
 )
+from .tools.tools_query_history import (
+    QueryPlanHistoryToolHandler,
+)
+from .tools.tools_query_rewrite import (
+    QueryRewriteSuggestionsToolHandler,
+)
+from .tools.tools_vacuum import (
+    VacuumProgressToolHandler,
+)
 
 # Configure logging
 logging.basicConfig(
@@ -165,6 +174,15 @@ def register_all_tools() -> None:
     add_tool_handler(TableBloatToolHandler(driver))
     add_tool_handler(IndexBloatToolHandler(driver))
     add_tool_handler(DatabaseBloatSummaryToolHandler(driver))
+
+    # Query plan history and comparison tools
+    add_tool_handler(QueryPlanHistoryToolHandler(driver))
+
+    # Vacuum progress monitoring tools
+    add_tool_handler(VacuumProgressToolHandler(driver))
+
+    # Query rewrite suggestion tools
+    add_tool_handler(QueryRewriteSuggestionsToolHandler(driver))
 
     logger.info(f"Registered {len(tool_handlers)} tool handlers")
 
