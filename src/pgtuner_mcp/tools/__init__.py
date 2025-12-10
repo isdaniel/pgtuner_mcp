@@ -20,8 +20,12 @@ from .tools_index import (
 )
 from .tools_performance import (
     AnalyzeQueryToolHandler,
+    DiskIOPatternToolHandler,
     GetSlowQueriesToolHandler,
     TableStatsToolHandler,
+)
+from .tools_vacuum import (
+    VacuumProgressToolHandler,
 )
 
 __all__ = [
@@ -30,6 +34,7 @@ __all__ = [
     "GetSlowQueriesToolHandler",
     "AnalyzeQueryToolHandler",
     "TableStatsToolHandler",
+    "DiskIOPatternToolHandler",
     # Index tools
     "IndexAdvisorToolHandler",
     "ExplainQueryToolHandler",
@@ -44,4 +49,6 @@ __all__ = [
     "TableBloatToolHandler",
     "IndexBloatToolHandler",
     "DatabaseBloatSummaryToolHandler",
+    # Vacuum monitoring tools
+    "VacuumProgressToolHandler",
 ]

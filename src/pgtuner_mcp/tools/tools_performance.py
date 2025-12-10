@@ -258,6 +258,11 @@ but be careful with INSERT/UPDATE/DELETE - use analyze_only=false for those."""
             output_format = arguments.get("format", "json")
             settings = arguments.get("settings", False)
 
+            # Validate output_format against whitelist (defense in depth)
+            valid_formats = {"text", "json", "yaml", "xml"}
+            if output_format.lower() not in valid_formats:
+                output_format = "json"
+
             # Build EXPLAIN options
             options = []
             if analyze:
@@ -640,3 +645,567 @@ or have performance issues."""
                 )
 
         return analysis
+
+
+class DiskIOPatternToolHandler(ToolHandler):
+    """Tool handler for analyzing disk I/O patterns and identifying bottlenecks."""
+
+    name = "analyze_disk_io_patterns"
+    title = "Disk I/O Pattern Analyzer"
+    read_only_hint = True
+    destructive_hint = False
+    idempotent_hint = True
+    open_world_hint = False
+    description = """Analyze disk I/O read/write patterns in PostgreSQL.
+
+Note: This tool focuses on user/client tables and excludes PostgreSQL
+system tables (pg_catalog, information_schema, pg_toast) from analysis.
+
+This tool provides comprehensive I/O analysis including:
+- Buffer pool I/O statistics (hits vs reads)
+- Table and index I/O patterns (sequential vs random reads)
+- Backend vs background writer I/O distribution
+- Temporary file I/O usage
+- Checkpointer I/O statistics
+- Per-table read/write hotspots
+
+For PostgreSQL 16+, additional pg_stat_io metrics are available.
+
+Use this to identify:
+- Tables with high I/O activity (hot tables)
+- I/O bottlenecks and cache inefficiencies
+- Sequential scan heavy workloads
+- Temporary file spills indicating work_mem issues"""
+
+    def __init__(self, sql_driver: SqlDriver):
+        self.sql_driver = sql_driver
+
+    def get_tool_definition(self) -> Tool:
+        return Tool(
+            name=self.name,
+            description=self.description,
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "schema_name": {
+                        "type": "string",
+                        "description": "Schema to analyze (default: public)",
+                        "default": "public"
+                    },
+                    "include_indexes": {
+                        "type": "boolean",
+                        "description": "Include index I/O statistics",
+                        "default": True
+                    },
+                    "top_n": {
+                        "type": "integer",
+                        "description": "Number of top tables to return by I/O activity",
+                        "default": 20,
+                        "minimum": 1,
+                        "maximum": 100
+                    },
+                    "analysis_type": {
+                        "type": "string",
+                        "description": "Type of I/O analysis to perform",
+                        "enum": ["all", "tables", "indexes", "buffer_pool", "temp_files", "checkpoints"],
+                        "default": "all"
+                    },
+                    "min_size_gb": {
+                        "type": "number",
+                        "description": "Minimum table/index size in GB to include in analysis (default: 1)",
+                        "default": 1,
+                        "minimum": 0
+                    }
+                },
+                "required": []
+            },
+            annotations=self.get_annotations()
+        )
+
+    async def run_tool(self, arguments: dict[str, Any]) -> Sequence[TextContent]:
+        try:
+            schema_name = arguments.get("schema_name", "public")
+            include_indexes = arguments.get("include_indexes", True)
+            top_n = arguments.get("top_n", 20)
+            analysis_type = arguments.get("analysis_type", "all")
+            min_size_gb = arguments.get("min_size_gb", 1)
+
+            output: dict[str, Any] = {
+                "schema": schema_name,
+                "analysis_type": analysis_type,
+                "io_patterns": {},
+                "analysis": {
+                    "issues": [],
+                    "recommendations": []
+                }
+            }
+
+            # Collect different types of I/O statistics based on analysis_type
+            if analysis_type in ("all", "buffer_pool"):
+                await self._analyze_buffer_pool(output)
+
+            if analysis_type in ("all", "tables"):
+                await self._analyze_table_io(output, schema_name, top_n, min_size_gb)
+
+            if analysis_type in ("all", "indexes") and include_indexes:
+                await self._analyze_index_io(output, schema_name, top_n, min_size_gb)
+
+            if analysis_type in ("all", "temp_files"):
+                await self._analyze_temp_files(output)
+
+            if analysis_type in ("all", "checkpoints"):
+                await self._analyze_checkpoint_io(output)
+
+            # Check for pg_stat_io availability (PostgreSQL 16+)
+            await self._analyze_pg_stat_io(output)
+
+            # Generate summary and recommendations
+            self._generate_io_recommendations(output)
+
+            return self.format_json_result(output)
+
+        except Exception as e:
+            return self.format_error(e)
+
+    async def _analyze_buffer_pool(self, output: dict[str, Any]) -> None:
+        """Analyze buffer pool I/O statistics."""
+        query = """
+            SELECT
+                sum(heap_blks_read) as heap_blocks_read,
+                sum(heap_blks_hit) as heap_blocks_hit,
+                sum(idx_blks_read) as index_blocks_read,
+                sum(idx_blks_hit) as index_blocks_hit,
+                sum(toast_blks_read) as toast_blocks_read,
+                sum(toast_blks_hit) as toast_blocks_hit,
+                sum(tidx_blks_read) as toast_index_blocks_read,
+                sum(tidx_blks_hit) as toast_index_blocks_hit,
+                CASE
+                    WHEN sum(heap_blks_hit) + sum(heap_blks_read) > 0
+                    THEN ROUND(100.0 * sum(heap_blks_hit) / (sum(heap_blks_hit) + sum(heap_blks_read)), 2)
+                    ELSE 100
+                END as heap_hit_ratio,
+                CASE
+                    WHEN sum(idx_blks_hit) + sum(idx_blks_read) > 0
+                    THEN ROUND(100.0 * sum(idx_blks_hit) / (sum(idx_blks_hit) + sum(idx_blks_read)), 2)
+                    ELSE 100
+                END as index_hit_ratio
+            FROM pg_statio_user_tables
+        """
+        result = await self.sql_driver.execute_query(query)
+
+        if result:
+            row = result[0]
+            heap_hit = row.get("heap_hit_ratio") or 100
+            idx_hit = row.get("index_hit_ratio") or 100
+
+            output["io_patterns"]["buffer_pool"] = {
+                "heap_blocks_read": row.get("heap_blocks_read") or 0,
+                "heap_blocks_hit": row.get("heap_blocks_hit") or 0,
+                "heap_hit_ratio": heap_hit,
+                "index_blocks_read": row.get("index_blocks_read") or 0,
+                "index_blocks_hit": row.get("index_blocks_hit") or 0,
+                "index_hit_ratio": idx_hit,
+                "toast_blocks_read": row.get("toast_blocks_read") or 0,
+                "toast_blocks_hit": row.get("toast_blocks_hit") or 0
+            }
+
+            # Check for cache issues
+            if heap_hit < 90:
+                output["analysis"]["issues"].append(
+                    f"Low heap buffer cache hit ratio: {heap_hit}%"
+                )
+                output["analysis"]["recommendations"].append(
+                    "Consider increasing shared_buffers to improve cache hit ratio"
+                )
+            if idx_hit < 95:
+                output["analysis"]["issues"].append(
+                    f"Low index buffer cache hit ratio: {idx_hit}%"
+                )
+                output["analysis"]["recommendations"].append(
+                    "Ensure frequently accessed indexes fit in buffer cache"
+                )
+
+    async def _analyze_table_io(self, output: dict[str, Any], schema_name: str, top_n: int, min_size_gb: float = 1) -> None:
+        """Analyze table-level I/O patterns."""
+        min_size_bytes = int(min_size_gb * 1024 * 1024 * 1024)
+        query = """
+            SELECT
+                s.schemaname,
+                s.relname as table_name,
+                s.heap_blks_read,
+                s.heap_blks_hit,
+                CASE
+                    WHEN s.heap_blks_hit + s.heap_blks_read > 0
+                    THEN ROUND(100.0 * s.heap_blks_hit / (s.heap_blks_hit + s.heap_blks_read), 2)
+                    ELSE 100
+                END as heap_hit_ratio,
+                s.idx_blks_read,
+                s.idx_blks_hit,
+                CASE
+                    WHEN s.idx_blks_hit + s.idx_blks_read > 0
+                    THEN ROUND(100.0 * s.idx_blks_hit / (s.idx_blks_hit + s.idx_blks_read), 2)
+                    ELSE 100
+                END as idx_hit_ratio,
+                s.heap_blks_read + COALESCE(s.idx_blks_read, 0) as total_reads,
+                s.heap_blks_hit + COALESCE(s.idx_blks_hit, 0) as total_hits,
+                pg_total_relation_size(c.oid) as table_size_bytes
+            FROM pg_statio_user_tables s
+            JOIN pg_class c ON c.relname = s.relname AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+            JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
+            WHERE s.schemaname = %s
+              AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              AND pg_total_relation_size(c.oid) >= %s
+            ORDER BY (s.heap_blks_read + COALESCE(s.idx_blks_read, 0)) DESC
+            LIMIT %s
+        """
+        result = await self.sql_driver.execute_query(query, [schema_name, min_size_bytes, top_n])
+
+        # Also get sequential vs index scan patterns
+        scan_query = """
+            SELECT
+                s.schemaname,
+                s.relname as table_name,
+                s.seq_scan,
+                s.seq_tup_read,
+                s.idx_scan,
+                s.idx_tup_fetch,
+                CASE
+                    WHEN s.seq_scan + COALESCE(s.idx_scan, 0) > 0
+                    THEN ROUND(100.0 * s.seq_scan / (s.seq_scan + COALESCE(s.idx_scan, 0)), 2)
+                    ELSE 0
+                END as seq_scan_ratio,
+                s.n_live_tup,
+                s.n_dead_tup
+            FROM pg_stat_user_tables s
+            JOIN pg_class c ON c.relname = s.relname AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+            JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
+            WHERE s.schemaname = %s
+              AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              AND pg_total_relation_size(c.oid) >= %s
+            ORDER BY s.seq_tup_read DESC
+            LIMIT %s
+        """
+        scan_result = await self.sql_driver.execute_query(scan_query, [schema_name, min_size_bytes, top_n])
+
+        # Combine results
+        tables = []
+        scan_data = {r["table_name"]: r for r in scan_result} if scan_result else {}
+
+        if result:
+            for row in result:
+                table_name = row.get("table_name")
+                scan_info = scan_data.get(table_name, {})
+
+                tables.append({
+                    "table_name": table_name,
+                    "heap_blocks_read": row.get("heap_blks_read") or 0,
+                    "heap_blocks_hit": row.get("heap_blks_hit") or 0,
+                    "heap_hit_ratio": row.get("heap_hit_ratio") or 100,
+                    "index_blocks_read": row.get("idx_blks_read") or 0,
+                    "index_blocks_hit": row.get("idx_blks_hit") or 0,
+                    "index_hit_ratio": row.get("idx_hit_ratio") or 100,
+                    "total_physical_reads": row.get("total_reads") or 0,
+                    "seq_scans": scan_info.get("seq_scan") or 0,
+                    "seq_tuples_read": scan_info.get("seq_tup_read") or 0,
+                    "idx_scans": scan_info.get("idx_scan") or 0,
+                    "idx_tuples_fetched": scan_info.get("idx_tup_fetch") or 0,
+                    "seq_scan_ratio": scan_info.get("seq_scan_ratio") or 0,
+                    "live_tuples": scan_info.get("n_live_tup") or 0
+                })
+
+                # Identify hot tables with low cache hit
+                heap_hit = row.get("heap_hit_ratio") or 100
+                total_reads = row.get("total_reads") or 0
+                if total_reads > 1000 and heap_hit < 85:
+                    output["analysis"]["issues"].append(
+                        f"Table '{table_name}' has high I/O ({total_reads} reads) with low cache hit ({heap_hit}%)"
+                    )
+
+                # Identify sequential scan heavy tables
+                seq_ratio = scan_info.get("seq_scan_ratio") or 0
+                live_tuples = scan_info.get("n_live_tup") or 0
+                if seq_ratio > 80 and live_tuples > 10000:
+                    output["analysis"]["issues"].append(
+                        f"Table '{table_name}' has {seq_ratio}% sequential scans with {live_tuples} rows"
+                    )
+                    output["analysis"]["recommendations"].append(
+                        f"Consider adding indexes to table '{table_name}' to reduce sequential scans"
+                    )
+
+        output["io_patterns"]["tables"] = {
+            "count": len(tables),
+            "top_tables_by_io": tables
+        }
+
+    async def _analyze_index_io(self, output: dict[str, Any], schema_name: str, top_n: int, min_size_gb: float = 1) -> None:
+        """Analyze index-level I/O patterns."""
+        min_size_bytes = int(min_size_gb * 1024 * 1024 * 1024)
+        query = """
+            SELECT
+                s.schemaname,
+                s.relname as table_name,
+                s.indexrelname as index_name,
+                s.idx_blks_read,
+                s.idx_blks_hit,
+                CASE
+                    WHEN s.idx_blks_hit + s.idx_blks_read > 0
+                    THEN ROUND(100.0 * s.idx_blks_hit / (s.idx_blks_hit + s.idx_blks_read), 2)
+                    ELSE 100
+                END as hit_ratio,
+                pg_relation_size(s.indexrelid) as index_size_bytes
+            FROM pg_statio_user_indexes s
+            JOIN pg_class i ON i.relname = s.indexrelname AND i.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+            JOIN pg_namespace n ON n.oid = i.relnamespace AND n.nspname = s.schemaname
+            WHERE s.schemaname = %s
+              AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
+              AND pg_relation_size(s.indexrelid) >= %s
+            ORDER BY s.idx_blks_read DESC
+            LIMIT %s
+        """
+        result = await self.sql_driver.execute_query(query, [schema_name, min_size_bytes, top_n])
+
+        if result:
+            indexes = []
+            for row in result:
+                indexes.append({
+                    "index_name": row.get("index_name"),
+                    "table_name": row.get("table_name"),
+                    "blocks_read": row.get("idx_blks_read") or 0,
+                    "blocks_hit": row.get("idx_blks_hit") or 0,
+                    "hit_ratio": row.get("hit_ratio") or 100
+                })
+
+                # Check for indexes with poor cache hit
+                hit_ratio = row.get("hit_ratio") or 100
+                blocks_read = row.get("idx_blks_read") or 0
+                if blocks_read > 1000 and hit_ratio < 90:
+                    output["analysis"]["issues"].append(
+                        f"Index '{row.get('index_name')}' has high I/O with low cache hit ({hit_ratio}%)"
+                    )
+
+            output["io_patterns"]["indexes"] = {
+                "count": len(indexes),
+                "top_indexes_by_io": indexes
+            }
+
+    async def _analyze_temp_files(self, output: dict[str, Any]) -> None:
+        """Analyze temporary file I/O usage."""
+        query = """
+            SELECT
+                datname,
+                temp_files,
+                temp_bytes,
+                pg_size_pretty(temp_bytes) as temp_size_pretty
+            FROM pg_stat_database
+            WHERE datname = current_database()
+        """
+        result = await self.sql_driver.execute_query(query)
+
+        if result:
+            row = result[0]
+            temp_files = row.get("temp_files") or 0
+            temp_bytes = row.get("temp_bytes") or 0
+
+            output["io_patterns"]["temp_files"] = {
+                "temp_files_created": temp_files,
+                "temp_bytes_written": temp_bytes,
+                "temp_size_pretty": row.get("temp_size_pretty") or "0 bytes"
+            }
+
+            # Check for excessive temp file usage
+            if temp_files > 1000:
+                output["analysis"]["issues"].append(
+                    f"High temporary file usage: {temp_files} files created"
+                )
+                output["analysis"]["recommendations"].append(
+                    "Consider increasing work_mem to reduce temporary file spills"
+                )
+            if temp_bytes > 1024 * 1024 * 1024:  # > 1GB
+                output["analysis"]["issues"].append(
+                    f"Large temporary file I/O: {row.get('temp_size_pretty')}"
+                )
+                output["analysis"]["recommendations"].append(
+                    "Review queries using sorts, hashes, or CTEs that may spill to disk"
+                )
+
+    async def _analyze_checkpoint_io(self, output: dict[str, Any]) -> None:
+        """Analyze checkpoint and background writer I/O."""
+        query = """
+            SELECT
+                checkpoints_timed,
+                checkpoints_req,
+                checkpoint_write_time,
+                checkpoint_sync_time,
+                buffers_checkpoint,
+                buffers_clean,
+                buffers_backend,
+                buffers_backend_fsync,
+                buffers_alloc,
+                CASE
+                    WHEN buffers_checkpoint + buffers_clean + buffers_backend > 0
+                    THEN ROUND(100.0 * buffers_backend / (buffers_checkpoint + buffers_clean + buffers_backend), 2)
+                    ELSE 0
+                END as backend_write_ratio,
+                stats_reset
+            FROM pg_stat_bgwriter
+        """
+        result = await self.sql_driver.execute_query(query)
+
+        if result:
+            row = result[0]
+            backend_ratio = row.get("backend_write_ratio") or 0
+            buffers_backend_fsync = row.get("buffers_backend_fsync") or 0
+            checkpoints_req = row.get("checkpoints_req") or 0
+            checkpoints_timed = row.get("checkpoints_timed") or 0
+
+            output["io_patterns"]["checkpoints"] = {
+                "checkpoints_timed": checkpoints_timed,
+                "checkpoints_requested": checkpoints_req,
+                "checkpoint_write_time_ms": row.get("checkpoint_write_time") or 0,
+                "checkpoint_sync_time_ms": row.get("checkpoint_sync_time") or 0,
+                "buffers_written_by_checkpoint": row.get("buffers_checkpoint") or 0,
+                "buffers_written_by_bgwriter": row.get("buffers_clean") or 0,
+                "buffers_written_by_backend": row.get("buffers_backend") or 0,
+                "backend_fsync_count": buffers_backend_fsync,
+                "buffers_allocated": row.get("buffers_alloc") or 0,
+                "backend_write_ratio": backend_ratio,
+                "stats_reset": str(row.get("stats_reset")) if row.get("stats_reset") else None
+            }
+
+            # Check for backend doing too much writing
+            if backend_ratio > 20:
+                output["analysis"]["issues"].append(
+                    f"Backend processes writing {backend_ratio}% of buffers (should be near 0)"
+                )
+                output["analysis"]["recommendations"].append(
+                    "Increase shared_buffers and bgwriter_lru_maxpages to reduce backend writes"
+                )
+
+            # Check for backend fsyncs (very bad for performance)
+            if buffers_backend_fsync > 0:
+                output["analysis"]["issues"].append(
+                    f"Backend processes performed {buffers_backend_fsync} fsync calls (should be 0)"
+                )
+                output["analysis"]["recommendations"].append(
+                    "This indicates severe I/O performance issues - check storage and increase checkpointing"
+                )
+
+            # Check for too many requested checkpoints
+            total_checkpoints = checkpoints_timed + checkpoints_req
+            if total_checkpoints > 0 and checkpoints_req > checkpoints_timed:
+                output["analysis"]["issues"].append(
+                    f"More requested checkpoints ({checkpoints_req}) than timed ({checkpoints_timed})"
+                )
+                output["analysis"]["recommendations"].append(
+                    "Increase max_wal_size and checkpoint_timeout to reduce checkpoint frequency"
+                )
+
+    async def _analyze_pg_stat_io(self, output: dict[str, Any]) -> None:
+        """Analyze pg_stat_io for PostgreSQL 16+ detailed I/O statistics."""
+        # Check if pg_stat_io exists (PostgreSQL 16+)
+        check_query = """
+            SELECT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_class c
+                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                WHERE n.nspname = 'pg_catalog' AND c.relname = 'pg_stat_io'
+            ) as available
+        """
+        check_result = await self.sql_driver.execute_query(check_query)
+
+        if not check_result or not check_result[0].get("available"):
+            output["io_patterns"]["pg_stat_io"] = {
+                "available": False,
+                "message": "pg_stat_io is available in PostgreSQL 16+ for more detailed I/O statistics"
+            }
+            return
+
+        # Query pg_stat_io for detailed breakdown
+        query = """
+            SELECT
+                backend_type,
+                object,
+                context,
+                reads,
+                read_time,
+                writes,
+                write_time,
+                writebacks,
+                writeback_time,
+                extends,
+                extend_time,
+                hits,
+                evictions,
+                reuses,
+                fsyncs,
+                fsync_time
+            FROM pg_stat_io
+            WHERE reads > 0 OR writes > 0
+            ORDER BY reads + writes DESC
+            LIMIT 20
+        """
+        result = await self.sql_driver.execute_query(query)
+
+        if result:
+            output["io_patterns"]["pg_stat_io"] = {
+                "available": True,
+                "io_by_backend_and_object": result
+            }
+
+            # Analyze for issues
+            for row in result:
+                backend = row.get("backend_type", "unknown")
+                reads = row.get("reads") or 0
+                writes = row.get("writes") or 0
+                read_time = row.get("read_time") or 0
+                write_time = row.get("write_time") or 0
+
+                # Check for slow I/O
+                if reads > 0 and read_time / reads > 10:  # > 10ms average
+                    avg_time = read_time / reads
+                    output["analysis"]["issues"].append(
+                        f"Slow reads for {backend}: {avg_time:.2f}ms average"
+                    )
+
+    def _generate_io_recommendations(self, output: dict[str, Any]) -> None:
+        """Generate overall I/O recommendations based on analysis."""
+        issues = output["analysis"]["issues"]
+
+        # Remove duplicates while preserving order
+        seen_issues = set()
+        unique_issues = []
+        for issue in issues:
+            if issue not in seen_issues:
+                seen_issues.add(issue)
+                unique_issues.append(issue)
+        output["analysis"]["issues"] = unique_issues
+
+        # Remove duplicate recommendations
+        seen_recs = set()
+        unique_recs = []
+        for rec in output["analysis"]["recommendations"]:
+            if rec not in seen_recs:
+                seen_recs.add(rec)
+                unique_recs.append(rec)
+        output["analysis"]["recommendations"] = unique_recs
+
+        # Add summary
+        io_patterns = output["io_patterns"]
+        summary = {
+            "total_issues": len(unique_issues),
+            "total_recommendations": len(unique_recs)
+        }
+
+        if "buffer_pool" in io_patterns:
+            bp = io_patterns["buffer_pool"]
+            summary["heap_cache_hit_ratio"] = bp.get("heap_hit_ratio")
+            summary["index_cache_hit_ratio"] = bp.get("index_hit_ratio")
+
+        if "temp_files" in io_patterns:
+            tf = io_patterns["temp_files"]
+            summary["temp_files_created"] = tf.get("temp_files_created")
+
+        if "checkpoints" in io_patterns:
+            cp = io_patterns["checkpoints"]
+            summary["backend_write_ratio"] = cp.get("backend_write_ratio")
+
+        output["summary"] = summary

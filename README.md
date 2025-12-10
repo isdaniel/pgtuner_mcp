@@ -36,6 +36,21 @@ A Model Context Protocol (MCP) server that provides AI-powered PostgreSQL perfor
 - Replication lag monitoring
 - Background writer and checkpoint analysis
 
+### Vacuum Monitoring
+- Track long-running VACUUM and VACUUM FULL operations in real-time
+- Monitor autovacuum progress and performance
+- Identify tables that need vacuuming
+- View recent vacuum activity history
+- Analyze autovacuum configuration effectiveness
+
+### I/O Performance Analysis
+- Analyze disk read/write patterns across tables and indexes
+- Identify I/O bottlenecks and hot tables
+- Monitor buffer cache hit ratios
+- Track temporary file usage indicating work_mem issues
+- Analyze checkpoint and background writer I/O
+- PostgreSQL 16+ enhanced pg_stat_io metrics support
+
 ### Configuration Analysis
 - Review PostgreSQL settings by category
 - Get recommendations for memory, checkpoint, WAL, autovacuum, and connection settings
@@ -340,6 +355,7 @@ python -m pgtuner_mcp --mode streamable-http --debug
 | `get_slow_queries` | Retrieve slow queries from pg_stat_statements with detailed stats (total time, mean time, calls, cache hit ratio). Excludes system catalog queries. |
 | `analyze_query` | Analyze a query's execution plan with EXPLAIN ANALYZE, including automated issue detection |
 | `get_table_stats` | Get detailed table statistics including size, row counts, dead tuples, and access patterns |
+| `analyze_disk_io_patterns` | Analyze disk I/O read/write patterns, identify hot tables, buffer cache efficiency, and I/O bottlenecks. Supports filtering by analysis type (all, buffer_pool, tables, indexes, temp_files, checkpoints). |
 
 ### Index Tuning Tools
 
@@ -366,6 +382,12 @@ python -m pgtuner_mcp --mode streamable-http --debug
 | `analyze_table_bloat` | Analyze table bloat using pgstattuple extension. Shows dead tuple counts, free space, and wasted space percentage. |
 | `analyze_index_bloat` | Analyze B-tree index bloat using pgstatindex. Shows leaf density, fragmentation, and empty/deleted pages. Also supports GIN and Hash indexes. |
 | `get_bloat_summary` | Get a comprehensive overview of database bloat with top bloated tables/indexes, total reclaimable space, and priority maintenance actions. |
+
+### Vacuum Monitoring Tools
+
+| Tool | Description |
+|------|-------------|
+| `monitor_vacuum_progress` | Track manual VACUUM, VACUUM FULL, and autovacuum operations. Monitor progress percentage, dead tuples collected, index vacuum rounds, and estimated time remaining. Includes autovacuum configuration review and tables needing maintenance. |
 
 ### Tool Parameters
 
@@ -410,6 +432,17 @@ python -m pgtuner_mcp --mode streamable-http --debug
 - `schema_name`: Schema to analyze (default: `public`)
 - `top_n`: Number of top bloated objects to show (default: 10)
 - `min_size_gb`: Minimum object size in GB to include (default: 5)
+
+#### monitor_vacuum_progress
+- `action`: Action to perform - `progress` (monitor active vacuum operations), `needs_vacuum` (find tables needing vacuum), `autovacuum_status` (review autovacuum configuration), or `recent_activity` (view recent vacuum history)
+- `schema_name`: Schema to analyze (default: `public`, used with `needs_vacuum` action)
+- `top_n`: Number of results to return (default: 20)
+
+#### analyze_disk_io_patterns
+- `analysis_type`: Type of I/O analysis - `all` (comprehensive), `buffer_pool` (cache hit ratios), `tables` (table I/O patterns), `indexes` (index I/O patterns), `temp_files` (temporary file usage), or `checkpoints` (checkpoint I/O statistics)
+- `schema_name`: Schema to analyze (default: `public`)
+- `top_n`: Number of top I/O-intensive objects to show (default: 20)
+- `min_size_gb`: Minimum object size in GB to include (default: 1)
 
 ## MCP Prompts
 
