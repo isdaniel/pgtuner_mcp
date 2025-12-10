@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from mcp.types import TextContent, Tool
@@ -70,7 +70,7 @@ Returns a health score with detailed breakdown and recommendations."""
             verbose = arguments.get("verbose", False)
 
             health = {
-                "timestamp": datetime.utcnow().isoformat(),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
                 "checks": {},
                 "overall_score": 0,
                 "issues": [],

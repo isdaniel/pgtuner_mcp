@@ -11,6 +11,8 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from psycopg import sql
+
 from .sql_driver import (
     SqlDriver,
     check_extension_available,
@@ -162,22 +164,43 @@ class HypoPGService:
         """
         await self.ensure_available()
 
-        # Build the CREATE INDEX statement
-        qualified_table = f"{schema}.{table}" if schema else table
-        columns_str = ", ".join(columns)
+        # Build the CREATE INDEX statement using safe SQL composition
+        # Use sql.Identifier for proper escaping of table and column names
+        if schema:
+            table_ident = sql.Identifier(schema, table)
+        else:
+            table_ident = sql.Identifier(table)
 
-        create_stmt = f"CREATE INDEX ON {qualified_table} USING {using} ({columns_str})"
+        # Validate and whitelist the index access method
+        valid_access_methods = {"btree", "hash", "brin", "bloom", "gist", "gin", "spgist"}
+        if using.lower() not in valid_access_methods:
+            raise ValueError(f"Invalid index access method: {using}")
+
+        columns_ident = sql.SQL(", ").join(sql.Identifier(col) for col in columns)
+
+        # Build the base CREATE INDEX statement
+        create_stmt = sql.SQL("CREATE INDEX ON {} USING {} ({})").format(
+            table_ident,
+            sql.SQL(using),  # validated above
+            columns_ident
+        )
 
         if include:
-            include_str = ", ".join(include)
-            create_stmt += f" INCLUDE ({include_str})"
+            include_ident = sql.SQL(", ").join(sql.Identifier(col) for col in include)
+            create_stmt = sql.Composed([create_stmt, sql.SQL(" INCLUDE ("), include_ident, sql.SQL(")")])
 
         if where:
-            create_stmt += f" WHERE {where}"
+            # WHERE clause is user-provided SQL expression - use as-is but document the risk
+            # Note: The WHERE clause is intentionally passed through as the user's filter expression
+            create_stmt = sql.Composed([create_stmt, sql.SQL(" WHERE "), sql.SQL(where)])
 
-        # Create the hypothetical index
+        # Convert to string for hypopg_create_index (which expects a SQL statement as text)
+        create_stmt_str = create_stmt.as_string()
+
+        # Create the hypothetical index using parameterized query
         result = await self.driver.execute_query(
-            f"SELECT * FROM hypopg_create_index($${create_stmt}$$)"
+            "SELECT * FROM hypopg_create_index(%s)",
+            [create_stmt_str]
         )
 
         if not result:
@@ -208,11 +231,24 @@ class HypoPGService:
 
         Returns:
             HypotheticalIndex with the created index info
+
+        Note:
+            The create_index_sql parameter is expected to be a valid CREATE INDEX
+            statement. This method uses parameterized queries to pass the statement
+            to hypopg_create_index(), which only processes CREATE INDEX statements
+            and ignores any other SQL.
         """
         await self.ensure_available()
 
+        # Validate that it looks like a CREATE INDEX statement
+        normalized = create_index_sql.strip().upper()
+        if not normalized.startswith("CREATE") or "INDEX" not in normalized:
+            raise ValueError("Invalid CREATE INDEX statement")
+
+        # Use parameterized query - hypopg_create_index only processes CREATE INDEX
         result = await self.driver.execute_query(
-            f"SELECT * FROM hypopg_create_index($${create_index_sql}$$)"
+            "SELECT * FROM hypopg_create_index(%s)",
+            [create_index_sql]
         )
 
         if not result:
@@ -275,7 +311,8 @@ class HypoPGService:
         """
         try:
             result = await self.driver.execute_query(
-                f"SELECT hypopg_get_indexdef({indexrelid}) as indexdef"
+                "SELECT hypopg_get_indexdef(%s) as indexdef",
+                [indexrelid]
             )
             if result:
                 return result[0].get("indexdef")
@@ -295,7 +332,8 @@ class HypoPGService:
         """
         try:
             result = await self.driver.execute_query(
-                f"SELECT hypopg_relation_size({indexrelid}) as size"
+                "SELECT hypopg_relation_size(%s) as size",
+                [indexrelid]
             )
             if result:
                 return result[0].get("size")
@@ -317,7 +355,8 @@ class HypoPGService:
 
         try:
             await self.driver.execute_query(
-                f"SELECT hypopg_drop_index({indexrelid})"
+                "SELECT hypopg_drop_index(%s)",
+                [indexrelid]
             )
             logger.info(f"Dropped hypothetical index: {indexrelid}")
             return True
@@ -356,7 +395,8 @@ class HypoPGService:
 
         try:
             result = await self.driver.execute_query(
-                f"SELECT hypopg_hide_index({indexrelid})"
+                "SELECT hypopg_hide_index(%s)",
+                [indexrelid]
             )
             if result:
                 return result[0].get("hypopg_hide_index", False)
@@ -378,7 +418,8 @@ class HypoPGService:
 
         try:
             result = await self.driver.execute_query(
-                f"SELECT hypopg_unhide_index({indexrelid})"
+                "SELECT hypopg_unhide_index(%s)",
+                [indexrelid]
             )
             if result:
                 return result[0].get("hypopg_unhide_index", False)
