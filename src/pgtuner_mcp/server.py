@@ -71,8 +71,12 @@ from .tools.tools_index import (
 )
 from .tools.tools_performance import (
     AnalyzeQueryToolHandler,
+    DiskIOPatternToolHandler,
     GetSlowQueriesToolHandler,
     TableStatsToolHandler,
+)
+from .tools.tools_vacuum import (
+    VacuumProgressToolHandler,
 )
 
 # Configure logging
@@ -148,6 +152,7 @@ def register_all_tools() -> None:
     add_tool_handler(GetSlowQueriesToolHandler(driver))
     add_tool_handler(AnalyzeQueryToolHandler(driver))
     add_tool_handler(TableStatsToolHandler(driver))
+    add_tool_handler(DiskIOPatternToolHandler(driver))
 
     # Index tuning tools
     add_tool_handler(IndexAdvisorToolHandler(index_advisor))
@@ -165,6 +170,9 @@ def register_all_tools() -> None:
     add_tool_handler(TableBloatToolHandler(driver))
     add_tool_handler(IndexBloatToolHandler(driver))
     add_tool_handler(DatabaseBloatSummaryToolHandler(driver))
+
+    # Vacuum progress monitoring tools
+    add_tool_handler(VacuumProgressToolHandler(driver))
 
     logger.info(f"Registered {len(tool_handlers)} tool handlers")
 
