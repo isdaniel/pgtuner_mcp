@@ -850,7 +850,7 @@ Use this to identify:
                 s.heap_blks_hit + COALESCE(s.idx_blks_hit, 0) as total_hits,
                 pg_total_relation_size(c.oid) as table_size_bytes
             FROM pg_statio_user_tables s
-            JOIN pg_class c ON c.relname = s.relname AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+            JOIN pg_class c ON c.oid = s.relid
             JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
             WHERE s.schemaname = %s
               AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
@@ -877,7 +877,7 @@ Use this to identify:
                 s.n_live_tup,
                 s.n_dead_tup
             FROM pg_stat_user_tables s
-            JOIN pg_class c ON c.relname = s.relname AND c.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+            JOIN pg_class c ON c.oid = s.relid
             JOIN pg_namespace n ON n.oid = c.relnamespace AND n.nspname = s.schemaname
             WHERE s.schemaname = %s
               AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
@@ -954,7 +954,7 @@ Use this to identify:
                 END as hit_ratio,
                 pg_relation_size(s.indexrelid) as index_size_bytes
             FROM pg_statio_user_indexes s
-            JOIN pg_class i ON i.relname = s.indexrelname AND i.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = s.schemaname)
+            JOIN pg_class i ON i.oid = s.indexrelid
             JOIN pg_namespace n ON n.oid = i.relnamespace AND n.nspname = s.schemaname
             WHERE s.schemaname = %s
               AND s.schemaname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
@@ -1164,6 +1164,12 @@ Use this to identify:
                     avg_time = read_time / reads
                     output["analysis"]["issues"].append(
                         f"Slow reads for {backend}: {avg_time:.2f}ms average"
+                    )
+
+                if writes > 0 and write_time / writes > 10:  # > 10ms average
+                    avg_time = write_time / writes
+                    output["analysis"]["issues"].append(
+                        f"Slow writes for {backend}: {avg_time:.2f}ms average"
                     )
 
     def _generate_io_recommendations(self, output: dict[str, Any]) -> None:
