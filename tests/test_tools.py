@@ -1137,6 +1137,135 @@ class TestVacuumProgressToolHandler:
         assert "recent_activity" in result_text
         assert "summary" in result_text
 
+    # Tests for SQL placeholder escaping - prevents "only '%s', '%b', '%t' are allowed" errors
+    # These tests ensure that % wildcards in LIKE patterns are properly escaped as %%
+
+    @pytest.mark.asyncio
+    async def test_needs_vacuum_excludes_toast_with_escaped_placeholder(self, mock_sql_driver):
+        """Test that LIKE pattern with % is properly escaped when excluding TOAST tables."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [],  # Tables needing vacuum
+            []   # wraparound query
+        ])
+
+        handler = VacuumProgressToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "action": "needs_vacuum",
+            "include_toast": False,
+            "min_dead_tuples": 1000
+        })
+
+        # Verify the query was called
+        assert mock_sql_driver.execute_query.called
+
+        # Get the first call (main query, not wraparound query)
+        first_call = mock_sql_driver.execute_query.call_args_list[0]
+        query = first_call[0][0]
+
+        # Verify that %% (escaped %) is in the query for LIKE pattern
+        assert "NOT LIKE 'pg_toast%%'" in query
+        # Verify there's no unescaped % in LIKE pattern (would cause placeholder error)
+        assert "NOT LIKE 'pg_toast%'" not in query or "NOT LIKE 'pg_toast%%'" in query
+
+    @pytest.mark.asyncio
+    async def test_needs_vacuum_includes_toast_no_filter(self, mock_sql_driver):
+        """Test that TOAST tables are included when include_toast=True."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [],  # Tables needing vacuum
+            []   # wraparound query
+        ])
+
+        handler = VacuumProgressToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "action": "needs_vacuum",
+            "include_toast": True,
+            "min_dead_tuples": 1000
+        })
+
+        # Get the first call
+        first_call = mock_sql_driver.execute_query.call_args_list[0]
+        query = first_call[0][0]
+
+        # Verify no TOAST filter is applied when include_toast=True
+        assert "NOT LIKE 'pg_toast" not in query
+
+    @pytest.mark.asyncio
+    async def test_recent_activity_excludes_toast_with_escaped_placeholder(self, mock_sql_driver):
+        """Test that LIKE pattern with % is properly escaped in recent_activity action."""
+        mock_sql_driver.execute_query = AsyncMock(return_value=[])
+
+        handler = VacuumProgressToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "action": "recent_activity",
+            "include_toast": False
+        })
+
+        # Verify the query was called
+        assert mock_sql_driver.execute_query.called
+
+        call_args = mock_sql_driver.execute_query.call_args
+        query = call_args[0][0]
+
+        # Verify that %% (escaped %) is in the query for LIKE pattern
+        assert "NOT LIKE 'pg_toast%%'" in query
+        # Verify there's no unescaped % in LIKE pattern
+        assert "NOT LIKE 'pg_toast%'" not in query or "NOT LIKE 'pg_toast%%'" in query
+
+    @pytest.mark.asyncio
+    async def test_progress_action_excludes_toast_with_escaped_placeholder(self, mock_sql_driver):
+        """Test that LIKE pattern with % is properly escaped in progress action."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [],  # progress query
+            [],  # vacuum full query
+            []   # autovacuum workers query
+        ])
+
+        handler = VacuumProgressToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "action": "progress",
+            "include_toast": False
+        })
+
+        # Verify all queries were called
+        assert mock_sql_driver.execute_query.call_count == 3
+
+        # Check all queries for proper escaping
+        for call in mock_sql_driver.execute_query.call_args_list:
+            query = call[0][0]
+            if "pg_toast" in query:
+                # Verify that %% (escaped %) is in the query for LIKE pattern
+                assert "NOT LIKE 'pg_toast%%'" in query
+                # Verify there's no unescaped % in LIKE pattern
+                assert "NOT LIKE 'pg_toast%'" not in query or "NOT LIKE 'pg_toast%%'" in query
+
+    @pytest.mark.asyncio
+    async def test_needs_vacuum_with_schema_filter_and_params(self, mock_sql_driver):
+        """Test that parameters are correctly ordered when schema_name is provided."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [],  # Tables needing vacuum
+            []   # wraparound query
+        ])
+
+        handler = VacuumProgressToolHandler(mock_sql_driver)
+        result = await handler.run_tool({
+            "action": "needs_vacuum",
+            "schema_name": "public",
+            "min_dead_tuples": 5000,
+            "include_toast": False
+        })
+
+        # Get the first call
+        first_call = mock_sql_driver.execute_query.call_args_list[0]
+        query = first_call[0][0]
+        params = first_call[0][1]
+
+        # Verify parameters are in correct order: [min_dead_tuples, schema_name]
+        assert params == [5000, "public"]
+
+        # Verify query has placeholders in correct order
+        assert "%s" in query
+        assert "n.nspname = %s" in query
+
 
 class TestDiskIOPatternToolHandler:
     """Tests for DiskIOPatternToolHandler."""

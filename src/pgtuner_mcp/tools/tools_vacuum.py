@@ -64,7 +64,7 @@ Useful for:
                             "autovacuum_status",  # Show autovacuum configuration and status
                             "recent_activity"  # Show recent vacuum activity
                         ],
-                        "default": "progress"
+                        "default": "needs_vacuum"
                     },
                     "schema_name": {
                         "type": "string",
@@ -113,7 +113,7 @@ Useful for:
         user_filter = get_user_filter()
         activity_filter = user_filter.get_activity_filter()
 
-        toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%'"
+        toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%%'"
 
         # Query pg_stat_progress_vacuum for vacuum progress
         progress_query = f"""
@@ -227,8 +227,14 @@ Useful for:
         min_dead_tuples = arguments.get("min_dead_tuples", 1000)
         include_toast = arguments.get("include_toast", False)
 
-        toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%'"
-        schema_filter = "AND n.nspname = %s" if schema_name else ""
+        toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%%'"
+
+        if schema_name:
+            schema_filter = "AND n.nspname = %s"
+            params: list[Any] = [min_dead_tuples, schema_name]
+        else:
+            schema_filter = ""
+            params = [min_dead_tuples]
 
         query = f"""
             SELECT
@@ -275,11 +281,6 @@ Useful for:
             ORDER BY s.n_dead_tup DESC
             LIMIT 50
         """
-
-        # Build parameters list - order matters for positional parameters
-        params: list[Any] = [min_dead_tuples]
-        if schema_name:
-            params.append(schema_name)
 
         results = await self.sql_driver.execute_query(query, params)
 
@@ -413,7 +414,7 @@ Useful for:
         schema_name = arguments.get("schema_name")
         include_toast = arguments.get("include_toast", False)
 
-        toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%'"
+        toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%%'"
         schema_filter = "AND n.nspname = %s" if schema_name else ""
 
         query = f"""
