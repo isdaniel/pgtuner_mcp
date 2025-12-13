@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-10-17/server.schema.json",
+  "name": "io.github.isdaniel/pgtuner_mcp",
+  "title": "PostgreSQL performance Tuner MCP Server",
+  "description": "provides AI-powered PostgreSQL performance tuning capabilities.",
+  "repository": {
+    "url": "https://github.com/isdaniel/pgtuner_mcp",
+    "source": "github"
+  },
+  "version": "0.5.1",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "identifier": "pgtuner-mcp",
+      "version": "0.5.1",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
