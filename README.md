@@ -663,3 +663,6 @@ Optional (for HTTP modes):
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
+
+<!-- Need to add this line for MCP registry publication -->
+<!-- mcp-name: io.github.isdaniel/pgtuner_mcp -->

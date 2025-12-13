@@ -7,12 +7,12 @@
     "url": "https://github.com/isdaniel/pgtuner_mcp",
     "source": "github"
   },
-  "version": "0.5.1",
+  "version": "0.5.2",
   "packages": [
     {
       "registryType": "pypi",
       "identifier": "pgtuner-mcp",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "transport": {
         "type": "stdio"
       }
