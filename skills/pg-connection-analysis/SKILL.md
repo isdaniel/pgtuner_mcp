@@ -78,7 +78,7 @@ Parameters:
 | `idle in transaction` | In open transaction, not executing | Should be < 5% |
 | `idle in transaction (aborted)` | Transaction failed, not rolled back | Should be 0 |
 | `fastpath function call` | Executing a fast-path function | Rare |
-| `disabled` | Track_activities is off | Should not appear |
+| `disabled` | track_activities is off | Should not appear |
 
 **Agent reasoning:**
 
