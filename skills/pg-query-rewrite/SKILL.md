@@ -291,16 +291,32 @@ CREATE INDEX idx_orders_cust_covering
 ON orders (customer_id) INCLUDE (id, order_date, total, status);
 ```
 
-Then verify:
+Then verify its potential impact using `manage_hypothetical_indexes`:
+
+**Step 1: Create the hypothetical covering index**
 ```
-Tool: explain_with_indexes
+Tool: manage_hypothetical_indexes
+Parameters:
+  action: "create"
+  table: "orders"
+  columns: ["customer_id"]
+  include: ["id", "order_date", "total", "status"]
+```
+
+**Step 2: Analyze the query plan with the hypothetical index**
+```
+Tool: analyze_query
 Parameters:
   query: "SELECT id, order_date, total, status FROM orders WHERE customer_id = 42"
-  hypothetical_indexes:
-    - table: "orders"
-      columns: ["customer_id"]
-      index_type: "btree"
   analyze: false
+  format: "text"
+```
+
+**Step 3: Clean up**
+```
+Tool: manage_hypothetical_indexes
+Parameters:
+  action: "reset"
 ```
 
 ## Step 4: Verify the Rewrite

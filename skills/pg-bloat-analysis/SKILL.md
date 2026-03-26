@@ -257,7 +257,7 @@ ALTER TABLE schema.table_name SET (
   autovacuum_vacuum_scale_factor = 0.01,      -- Vacuum at 1% dead tuples (default 20%)
   autovacuum_vacuum_threshold = 1000,          -- Minimum dead tuples before vacuum
   autovacuum_analyze_scale_factor = 0.005,     -- Analyze at 0.5% changes
-  autovacuum_vacuum_cost_delay = 2             -- Faster vacuum (default 20ms)
+  autovacuum_vacuum_cost_delay = '2ms'           -- Faster vacuum (default is 20ms on PG<12, 2ms on PG12+)
 );
 ```
 
