@@ -61,6 +61,10 @@ A Model Context Protocol (MCP) server that provides AI-powered PostgreSQL perfor
 - Dynamic resources for table stats, index info, and health checks
 - Comprehensive documentation resources
 
+## Hosted deployment
+
+A hosted deployment is available on [Fronteir AI](https://fronteir.ai/mcp/pgtuner-mcp).
+
 ## Installation
 
 ### Standard Installation (for MCP clients like Claude Desktop)
