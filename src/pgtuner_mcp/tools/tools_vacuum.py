@@ -9,6 +9,7 @@ from typing import Any
 from mcp.types import TextContent, Tool
 
 from ..services import SqlDriver, get_user_filter
+from ..services.sql_driver import get_postgres_version
 from .toolhandler import ToolHandler
 
 
@@ -115,6 +116,21 @@ Useful for:
 
         toast_filter = "" if include_toast else "AND c.relname NOT LIKE 'pg_toast%%'"
 
+        # PG17 renamed pg_stat_progress_vacuum.{max_dead_tuples,num_dead_tuples}
+        # to *_bytes variants. Alias to old names so downstream logic is
+        # unchanged.
+        pg_version = await get_postgres_version(self.sql_driver)
+        if pg_version >= 17:
+            dead_tuple_cols = (
+                "p.max_dead_tuple_bytes AS max_dead_tuples,\n"
+                "                p.dead_tuple_bytes AS num_dead_tuples,"
+            )
+        else:
+            dead_tuple_cols = (
+                "p.max_dead_tuples,\n"
+                "                p.num_dead_tuples,"
+            )
+
         # Query pg_stat_progress_vacuum for vacuum progress
         progress_query = f"""
             SELECT
@@ -127,8 +143,7 @@ Useful for:
                 p.heap_blks_scanned,
                 p.heap_blks_vacuumed,
                 p.index_vacuum_count,
-                p.max_dead_tuples,
-                p.num_dead_tuples,
+                {dead_tuple_cols}
                 CASE
                     WHEN p.heap_blks_total > 0
                     THEN ROUND(100.0 * p.heap_blks_scanned / p.heap_blks_total, 2)

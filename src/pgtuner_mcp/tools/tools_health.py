@@ -9,6 +9,7 @@ from typing import Any
 from mcp.types import TextContent, Tool
 
 from ..services import SqlDriver, get_user_filter
+from ..services.sql_driver import get_postgres_version
 from .toolhandler import ToolHandler
 
 
@@ -340,21 +341,41 @@ Returns a health score with detailed breakdown and recommendations."""
 
     async def _check_bgwriter(self, health: dict) -> None:
         """Check background writer statistics."""
-        query = """
-            SELECT
-                checkpoints_timed,
-                checkpoints_req,
-                CASE WHEN checkpoints_timed + checkpoints_req > 0
-                     THEN ROUND(100.0 * checkpoints_timed / (checkpoints_timed + checkpoints_req), 1)
-                     ELSE 100 END as timed_pct,
-                buffers_checkpoint,
-                buffers_clean,
-                buffers_backend,
-                CASE WHEN buffers_checkpoint + buffers_clean + buffers_backend > 0
-                     THEN ROUND(100.0 * buffers_backend / (buffers_checkpoint + buffers_clean + buffers_backend), 1)
-                     ELSE 0 END as backend_pct
-            FROM pg_stat_bgwriter
-        """
+        pg_version = await get_postgres_version(self.sql_driver)
+        if pg_version >= 17:
+            # PG17 split pg_stat_bgwriter; checkpoint columns moved to
+            # pg_stat_checkpointer with new names. buffers_backend was
+            # removed (use pg_stat_io). Alias to old names so downstream
+            # logic stays identical.
+            query = """
+                SELECT
+                    c.num_timed AS checkpoints_timed,
+                    c.num_requested AS checkpoints_req,
+                    CASE WHEN c.num_timed + c.num_requested > 0
+                         THEN ROUND(100.0 * c.num_timed / (c.num_timed + c.num_requested), 1)
+                         ELSE 100 END as timed_pct,
+                    c.buffers_written AS buffers_checkpoint,
+                    b.buffers_clean,
+                    0 AS buffers_backend,
+                    0 AS backend_pct
+                FROM pg_stat_checkpointer c, pg_stat_bgwriter b
+            """
+        else:
+            query = """
+                SELECT
+                    checkpoints_timed,
+                    checkpoints_req,
+                    CASE WHEN checkpoints_timed + checkpoints_req > 0
+                         THEN ROUND(100.0 * checkpoints_timed / (checkpoints_timed + checkpoints_req), 1)
+                         ELSE 100 END as timed_pct,
+                    buffers_checkpoint,
+                    buffers_clean,
+                    buffers_backend,
+                    CASE WHEN buffers_checkpoint + buffers_clean + buffers_backend > 0
+                         THEN ROUND(100.0 * buffers_backend / (buffers_checkpoint + buffers_clean + buffers_backend), 1)
+                         ELSE 0 END as backend_pct
+                FROM pg_stat_bgwriter
+            """
         result = await self.sql_driver.execute_query(query)
 
         if result:
@@ -382,20 +403,37 @@ Returns a health score with detailed breakdown and recommendations."""
 
     async def _check_checkpoints(self, health: dict) -> None:
         """Check checkpoint frequency and duration."""
-        query = """
-            SELECT
-                total_checkpoints,
-                seconds_since_start,
-                CASE WHEN seconds_since_start > 0
-                     THEN ROUND(3600.0 * total_checkpoints / seconds_since_start, 2)
-                     ELSE 0 END as checkpoints_per_hour
-            FROM (
+        pg_version = await get_postgres_version(self.sql_driver)
+        if pg_version >= 17:
+            query = """
                 SELECT
-                    checkpoints_timed + checkpoints_req as total_checkpoints,
-                    EXTRACT(epoch FROM now() - stats_reset) as seconds_since_start
-                FROM pg_stat_bgwriter
-            ) s
-        """
+                    total_checkpoints,
+                    seconds_since_start,
+                    CASE WHEN seconds_since_start > 0
+                         THEN ROUND(3600.0 * total_checkpoints / seconds_since_start, 2)
+                         ELSE 0 END as checkpoints_per_hour
+                FROM (
+                    SELECT
+                        num_timed + num_requested as total_checkpoints,
+                        EXTRACT(epoch FROM now() - stats_reset) as seconds_since_start
+                    FROM pg_stat_checkpointer
+                ) s
+            """
+        else:
+            query = """
+                SELECT
+                    total_checkpoints,
+                    seconds_since_start,
+                    CASE WHEN seconds_since_start > 0
+                         THEN ROUND(3600.0 * total_checkpoints / seconds_since_start, 2)
+                         ELSE 0 END as checkpoints_per_hour
+                FROM (
+                    SELECT
+                        checkpoints_timed + checkpoints_req as total_checkpoints,
+                        EXTRACT(epoch FROM now() - stats_reset) as seconds_since_start
+                    FROM pg_stat_bgwriter
+                ) s
+            """
         result = await self.sql_driver.execute_query(query)
 
         if result:
