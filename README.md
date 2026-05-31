@@ -91,6 +91,11 @@ pip install -e .
 |----------|-------------|----------|
 | `DATABASE_URI` | PostgreSQL connection string | Yes |
 | `PGTUNER_EXCLUDE_USERIDS` | Comma-separated list of user IDs (OIDs) to exclude from monitoring | No |
+| `PGTUNER_STATEMENT_TIMEOUT_MS` | Per-statement timeout in ms (default 30000, 0=disable) | No |
+| `PGTUNER_IDLE_TXN_TIMEOUT_MS` | Idle-in-txn timeout in ms (default 60000) | No |
+| `PGTUNER_LOCK_TIMEOUT_MS` | Lock timeout in ms (default 5000) | No |
+| `PGTUNER_CORS_ALLOW_ORIGINS` | Comma-separated CORS allowlist; `*` for all | No |
+| `PGTUNER_LINT_DISABLED_RULES` | Comma-separated rule IDs to disable in linter | No |
 
 **Connection String Format:** `postgresql://user:password@host:port/database`
 
@@ -270,6 +275,51 @@ Or Streamable HTTP Mode
   }
 }
 ```
+
+## Security Hardening
+
+`pgtuner_mcp` HTTP modes (`sse`, `streamable-http`) do **not** include authentication. They are safe for local-only use; for any networked deployment you MUST front them with a reverse proxy that handles auth and TLS.
+
+### Connection-level safeguards (built in)
+
+Every connection started by the pool receives session-level guards via libpq `options` at handshake time:
+
+| Env | Default | Effect |
+|---|---|---|
+| `PGTUNER_STATEMENT_TIMEOUT_MS` | `30000` | Per-statement cap. Caps `analyze_query` EXPLAIN ANALYZE. Set `0` to disable. |
+| `PGTUNER_IDLE_TXN_TIMEOUT_MS` | `60000` | Kills orphaned transactions. Set `0` to disable. |
+| `PGTUNER_LOCK_TIMEOUT_MS` | `5000` | Caps the tuning user's wait on application locks. |
+
+Belt-and-braces — also pin on the monitoring role:
+
+```sql
+ALTER ROLE pgtuner_monitor SET statement_timeout = '30s';
+ALTER ROLE pgtuner_monitor SET idle_in_transaction_session_timeout = '60s';
+```
+
+### CORS
+
+| Env | Default | Effect |
+|---|---|---|
+| `PGTUNER_CORS_ALLOW_ORIGINS` | (default: any localhost/127.0.0.1 port, http or https) | Comma-separated allowlist. Setting it switches off the localhost regex default and uses literal-origin matching. Use `*` to allow all (forces `allow_credentials=false`). |
+
+### Recommended reverse-proxy template (Caddy)
+
+```caddyfile
+mcp.example.com {
+  basicauth {
+    teamuser <hashed_password>
+  }
+  reverse_proxy localhost:8080
+}
+```
+
+### What is NOT included
+
+- No Bearer-token / API-key auth (operator concern — see reverse proxy)
+- No rate limiting (operator concern)
+- No in-process TLS (use the reverse proxy)
+- No per-client tool allowlist
 
 ## Server Modes
 
@@ -659,6 +709,22 @@ Core dependencies:
 Optional (for HTTP modes):
 - `starlette>=0.27.0` - ASGI framework
 - `uvicorn>=0.23.0` - ASGI server
+
+## Integration Testing
+
+Integration tests exercise every MCP tool against a live PostgreSQL via Docker.
+
+### Quickstart
+
+```bash
+make up PG=16            # start PG16 container
+make test-integration    # run integration suite (defaults to PG=16)
+make down                # tear down
+```
+
+Supported PG versions: 14, 15, 16, 17 (e.g., `make up PG=17`).
+
+CI runs the suite on every PR across all four PG versions via `.github/workflows/integration.yml`.
 
 ## Contributing
 

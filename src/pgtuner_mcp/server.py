@@ -75,6 +75,12 @@ from .tools.tools_performance import (
     GetSlowQueriesToolHandler,
     TableStatsToolHandler,
 )
+from .tools.tools_buffercache import (
+    AnalyzeBufferCacheHandler,
+    AnalyzeToastStorageHandler,
+)
+from .tools.tools_linter import LintQueryHandler, LintWorkloadHandler
+from .tools.tools_replication import CheckReplicationHealthHandler
 from .tools.tools_vacuum import (
     VacuumProgressToolHandler,
 )
@@ -174,7 +180,62 @@ def register_all_tools() -> None:
     # Vacuum progress monitoring tools
     add_tool_handler(VacuumProgressToolHandler(driver))
 
+    # Replication & WAL health tools
+    add_tool_handler(CheckReplicationHealthHandler(driver))
+
+    # Buffer cache & TOAST tools
+    add_tool_handler(AnalyzeBufferCacheHandler(driver))
+    add_tool_handler(AnalyzeToastStorageHandler(driver))
+
+    # Query anti-pattern linter
+    add_tool_handler(LintQueryHandler())
+    add_tool_handler(LintWorkloadHandler(driver))
+
     logger.info(f"Registered {len(tool_handlers)} tool handlers")
+
+
+def _resolve_cors_config() -> dict[str, Any]:
+    """Resolve CORS config from env vars with safe defaults.
+
+    Default allows any localhost / 127.0.0.1 port via regex.
+    An explicit env list uses literal allow_origins matching (no regex).
+    Wildcard "*" honored but forces allow_credentials=False.
+    """
+    raw = os.environ.get("PGTUNER_CORS_ALLOW_ORIGINS")
+    if not raw:
+        # Default: any localhost or 127.0.0.1 port, http or https
+        return {
+            "allow_origins": [],
+            "allow_origin_regex": r"^https?://(localhost|127\.0\.0\.1)(:\d+)?$",
+            "allow_credentials": True,
+            "allow_methods": ["GET", "POST", "OPTIONS"],
+            "allow_headers": ["*"],
+            "expose_headers": ["mcp-session-id", "mcp-protocol-version"],
+            "max_age": 86400,
+        }
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if "*" in origins:
+        allow_credentials = False
+        logger.warning(
+            "PGTUNER_CORS_ALLOW_ORIGINS contains wildcard '*' — forcing "
+            "allow_credentials=False (Starlette rejects wildcard + credentials)"
+        )
+    else:
+        allow_credentials = True
+    return {
+        "allow_origins": origins,
+        "allow_credentials": allow_credentials,
+        "allow_methods": ["GET", "POST", "OPTIONS"],
+        "allow_headers": ["*"],
+        "expose_headers": ["mcp-session-id", "mcp-protocol-version"],
+        "max_age": 86400,
+    }
+
+
+def _scrub_error_text(text: str) -> str:
+    """Replace any embedded connection URI password with `****`."""
+    from pgtuner_mcp.services.sql_driver import scrub_connection_uris
+    return scrub_connection_uris(text) or text
 
 
 def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlette:
@@ -205,13 +266,16 @@ def create_starlette_app(mcp_server: Server, *, debug: bool = False) -> Starlett
                 mcp_server.create_initialization_options(),
             )
 
-    return Starlette(
+    app = Starlette(
         debug=debug,
         routes=[
             Route("/sse", endpoint=handle_sse),
             Mount("/messages/", app=sse.handle_post_message),
         ],
     )
+    cors = _resolve_cors_config()
+    app.add_middleware(CORSMiddleware, **cors)
+    return app
 
 
 def create_streamable_http_app(mcp_server: Server, *, debug: bool = False, stateless: bool = False) -> Starlette:
@@ -263,15 +327,8 @@ def create_streamable_http_app(mcp_server: Server, *, debug: bool = False, state
     )
 
     # Add CORS middleware
-    starlette_app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["*"],
-        expose_headers=["mcp-session-id", "mcp-protocol-version"],
-        max_age=86400,
-    )
+    cors = _resolve_cors_config()
+    starlette_app.add_middleware(CORSMiddleware, **cors)
 
     return starlette_app
 
@@ -335,7 +392,7 @@ async def call_tool(name: str, arguments: Any) -> Sequence[TextContent | ImageCo
         return [
             TextContent(
                 type="text",
-                text=f"Error executing tool '{name}': {str(e)}"
+                text=_scrub_error_text(f"Error executing tool '{name}': {str(e)}")
             )
         ]
 

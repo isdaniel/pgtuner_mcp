@@ -80,9 +80,8 @@ class TestGetSlowQueriesToolHandler:
     @pytest.mark.asyncio
     async def test_run_tool_no_extension(self, mock_sql_driver):
         """Test behavior when pg_stat_statements is not available."""
-        mock_sql_driver.execute_query = AsyncMock(
-            return_value=[{"available": False}]
-        )
+        # check_extension_installed returns False when the SELECT yields no rows
+        mock_sql_driver.execute_query = AsyncMock(return_value=[])
 
         handler = GetSlowQueriesToolHandler(mock_sql_driver)
         result = await handler.run_tool({})
@@ -95,7 +94,7 @@ class TestGetSlowQueriesToolHandler:
     async def test_run_tool_with_results(self, mock_sql_driver):
         """Test behavior with slow queries returned."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
-            [{"available": True}],  # Extension check
+            [{"exists": True}],  # Extension check (check_extension_installed)
             [  # Slow queries
                 {
                     "queryid": 123,
@@ -1021,6 +1020,7 @@ class TestVacuumProgressToolHandler:
     async def test_progress_action_no_vacuum(self, mock_sql_driver):
         """Test progress action when no vacuum is running."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],  # get_postgres_version probe
             [],  # pg_stat_progress_vacuum
             [],  # pg_stat_progress_cluster
             []   # autovacuum workers
@@ -1036,6 +1036,7 @@ class TestVacuumProgressToolHandler:
     async def test_progress_action_with_vacuum(self, mock_sql_driver):
         """Test progress action with active vacuum."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],  # get_postgres_version probe
             [{  # pg_stat_progress_vacuum
                 "pid": 12345,
                 "database": "testdb",
@@ -1215,6 +1216,7 @@ class TestVacuumProgressToolHandler:
     async def test_progress_action_excludes_toast_with_escaped_placeholder(self, mock_sql_driver):
         """Test that LIKE pattern with % is properly escaped in progress action."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],  # get_postgres_version probe
             [],  # progress query
             [],  # vacuum full query
             []   # autovacuum workers query
@@ -1227,7 +1229,7 @@ class TestVacuumProgressToolHandler:
         })
 
         # Verify all queries were called
-        assert mock_sql_driver.execute_query.call_count == 3
+        assert mock_sql_driver.execute_query.call_count == 4
 
         # Check all queries for proper escaping
         for call in mock_sql_driver.execute_query.call_args_list:
@@ -1348,6 +1350,8 @@ class TestDiskIOPatternToolHandler:
                 "temp_bytes": 1048576,
                 "temp_size_pretty": "1 MB"
             }],
+            # get_postgres_version probe (inside _analyze_checkpoint_io)
+            [{"server_version": "16.2"}],
             # Checkpoint stats
             [{
                 "checkpoints_timed": 100,
@@ -1485,6 +1489,7 @@ class TestDiskIOPatternToolHandler:
     async def test_run_tool_checkpoints_only(self, mock_sql_driver):
         """Test running with checkpoints analysis type only."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],  # get_postgres_version probe
             [{
                 "checkpoints_timed": 50,
                 "checkpoints_req": 100,
@@ -1675,6 +1680,7 @@ class TestDiskIOPatternToolHandler:
     async def test_run_tool_backend_fsync_detection(self, mock_sql_driver):
         """Test detection of backend fsync issues."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],  # get_postgres_version probe
             [{
                 "checkpoints_timed": 100,
                 "checkpoints_req": 50,

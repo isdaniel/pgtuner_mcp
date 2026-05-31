@@ -255,3 +255,47 @@ class TestSqlDriver:
 
             assert len(result) == 2
             assert result[0]["id"] == 1
+
+
+class TestDbConnPoolTimeouts:
+    def test_default_timeouts_compose_pg_options(self, monkeypatch):
+        from pgtuner_mcp.services.sql_driver import _build_pg_options
+        monkeypatch.delenv("PGTUNER_STATEMENT_TIMEOUT_MS", raising=False)
+        monkeypatch.delenv("PGTUNER_IDLE_TXN_TIMEOUT_MS", raising=False)
+        monkeypatch.delenv("PGTUNER_LOCK_TIMEOUT_MS", raising=False)
+        opts = _build_pg_options()
+        assert "statement_timeout=30000" in opts
+        assert "idle_in_transaction_session_timeout=60000" in opts
+        assert "lock_timeout=5000" in opts
+
+    def test_env_overrides_picked_up(self, monkeypatch):
+        from pgtuner_mcp.services.sql_driver import _build_pg_options
+        monkeypatch.setenv("PGTUNER_STATEMENT_TIMEOUT_MS", "5000")
+        monkeypatch.setenv("PGTUNER_IDLE_TXN_TIMEOUT_MS", "0")
+        opts = _build_pg_options()
+        assert "statement_timeout=5000" in opts
+        assert "idle_in_transaction_session_timeout=0" in opts
+
+    def test_last_error_is_scrubbed(self):
+        from pgtuner_mcp.services.sql_driver import DbConnPool
+        p = DbConnPool("postgresql://u:secret@h:5432/d")
+        p._set_last_error("connection failed for postgresql://u:secret@h:5432/d")
+        assert "secret" not in (p.last_error or "")
+        assert "****" in (p.last_error or "")
+
+    def test_malicious_env_falls_back_to_default(self, monkeypatch):
+        """Non-digit env values must not inject extra libpq -c options."""
+        from pgtuner_mcp.services.sql_driver import _build_pg_options
+        monkeypatch.setenv(
+            "PGTUNER_STATEMENT_TIMEOUT_MS",
+            "1000 -c log_statement=all"
+        )
+        monkeypatch.setenv("PGTUNER_IDLE_TXN_TIMEOUT_MS", "")
+        monkeypatch.setenv("PGTUNER_LOCK_TIMEOUT_MS", "not-a-number")
+        opts = _build_pg_options()
+        # Fell back to safe defaults
+        assert "statement_timeout=30000" in opts
+        assert "idle_in_transaction_session_timeout=60000" in opts
+        assert "lock_timeout=5000" in opts
+        # Injection attempt was rejected
+        assert "log_statement" not in opts
