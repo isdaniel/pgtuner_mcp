@@ -158,8 +158,11 @@ class OrOfEqualsRule(Rule):
                 if "=" not in op_names:
                     continue
                 lexpr = getattr(a, "lexpr", None)
+                rexpr = getattr(a, "rexpr", None)
                 if lexpr is not None and type(lexpr).__name__ == "ColumnRef":
                     eq_cols.append(_col_name(lexpr))
+                elif rexpr is not None and type(rexpr).__name__ == "ColumnRef":
+                    eq_cols.append(_col_name(rexpr))
             if len(eq_cols) >= 2 and len(set(eq_cols)) == 1 and eq_cols[0]:
                 return [Finding(
                     self.rule_id, self.severity,
@@ -264,8 +267,9 @@ class FunctionOnIndexedColRule(Rule):
             for side in (getattr(n, "lexpr", None), getattr(n, "rexpr", None)):
                 if side is None or type(side).__name__ != "FuncCall":
                     continue
-                args = getattr(side, "args", None) or ()
-                if any(type(a).__name__ == "ColumnRef" for a in args):
+                # Walk the function-call subtree so nested forms like
+                # lower(coalesce(col, '')) are also flagged.
+                if any(type(sub).__name__ == "ColumnRef" for sub in _walk(side)):
                     fname_parts = [
                         getattr(f, "sval", "") or ""
                         for f in (getattr(side, "funcname", None) or ())
@@ -275,8 +279,10 @@ class FunctionOnIndexedColRule(Rule):
                         self.rule_id, self.severity,
                         f"Function '{fname}()' applied to a column in WHERE - "
                         "defeats plain index unless an expression index exists",
-                        suggestion=f"Create an expression index: "
-                                   f"CREATE INDEX ON tbl ({fname}(col));",
+                        suggestion=(
+                            "Create an expression index matching the WHERE-clause "
+                            "expression (e.g., CREATE INDEX ON tbl (expr);)"
+                        ),
                     )]
         return []
 

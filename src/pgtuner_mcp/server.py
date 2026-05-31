@@ -214,11 +214,11 @@ def _resolve_cors_config() -> dict[str, Any]:
             "max_age": 86400,
         }
     origins = [o.strip() for o in raw.split(",") if o.strip()]
-    if origins == ["*"]:
+    if "*" in origins:
         allow_credentials = False
         logger.warning(
-            "PGTUNER_CORS_ALLOW_ORIGINS=* — forcing allow_credentials=False "
-            "(wildcard + credentials is browser-rejected)"
+            "PGTUNER_CORS_ALLOW_ORIGINS contains wildcard '*' — forcing "
+            "allow_credentials=False (Starlette rejects wildcard + credentials)"
         )
     else:
         allow_credentials = True

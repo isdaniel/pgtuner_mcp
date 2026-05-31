@@ -44,10 +44,18 @@ def obfuscate_password(connection_string: str | None) -> str | None:
 
 
 def _build_pg_options() -> str:
-    """Build the Postgres `-c` options string from env vars."""
-    stmt = os.environ.get("PGTUNER_STATEMENT_TIMEOUT_MS", "30000")
-    idle = os.environ.get("PGTUNER_IDLE_TXN_TIMEOUT_MS", "60000")
-    lock = os.environ.get("PGTUNER_LOCK_TIMEOUT_MS", "5000")
+    """Build the Postgres `-c` options string from env vars.
+
+    Values are validated as non-negative integers; non-conforming inputs
+    fall back to defaults to prevent configuration injection into libpq.
+    """
+    def _digits(name: str, default: str) -> str:
+        v = os.environ.get(name, default)
+        return v if v.isdigit() else default
+
+    stmt = _digits("PGTUNER_STATEMENT_TIMEOUT_MS", "30000")
+    idle = _digits("PGTUNER_IDLE_TXN_TIMEOUT_MS", "60000")
+    lock = _digits("PGTUNER_LOCK_TIMEOUT_MS", "5000")
     return (
         f"-c statement_timeout={stmt} "
         f"-c idle_in_transaction_session_timeout={idle} "

@@ -37,6 +37,17 @@ class TestCorsConfig:
         assert cfg["allow_origins"] == ["*"]
         assert cfg["allow_credentials"] is False
 
+    def test_wildcard_in_mixed_list_forces_no_credentials(self, monkeypatch):
+        """Wildcard appearing alongside other origins must still disable
+        allow_credentials — Starlette rejects '*' + credentials at startup."""
+        from pgtuner_mcp.server import _resolve_cors_config
+        monkeypatch.setenv(
+            "PGTUNER_CORS_ALLOW_ORIGINS", "https://app.example,*"
+        )
+        cfg = _resolve_cors_config()
+        assert "*" in cfg["allow_origins"]
+        assert cfg["allow_credentials"] is False
+
 
 class TestErrorScrub:
     def test_scrub_uri_in_error_message(self):

@@ -142,3 +142,16 @@ class TestRulesExtended:
     def test_empty_sql_parse_error(self):
         f = QueryLinter().lint("")
         assert any(x.rule == "parse-error" for x in f)
+
+    def test_or_of_equals_positive_column_on_right(self):
+        """`1 = col OR 2 = col` is the same anti-pattern as col-on-left."""
+        f = QueryLinter().lint("SELECT id FROM t WHERE 1 = col OR 2 = col OR 3 = col")
+        assert "or-of-equals" in self._ids(f)
+
+    def test_function_on_indexed_col_nested(self):
+        """Nested function calls like lower(coalesce(col, '')) still defeat
+        plain indexes and should be flagged."""
+        f = QueryLinter().lint(
+            "SELECT id FROM users WHERE lower(coalesce(email, '')) = 'x@y.z'"
+        )
+        assert "function-on-indexed-col" in self._ids(f)

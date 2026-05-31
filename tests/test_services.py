@@ -282,3 +282,20 @@ class TestDbConnPoolTimeouts:
         p._set_last_error("connection failed for postgresql://u:secret@h:5432/d")
         assert "secret" not in (p.last_error or "")
         assert "****" in (p.last_error or "")
+
+    def test_malicious_env_falls_back_to_default(self, monkeypatch):
+        """Non-digit env values must not inject extra libpq -c options."""
+        from pgtuner_mcp.services.sql_driver import _build_pg_options
+        monkeypatch.setenv(
+            "PGTUNER_STATEMENT_TIMEOUT_MS",
+            "1000 -c log_statement=all"
+        )
+        monkeypatch.setenv("PGTUNER_IDLE_TXN_TIMEOUT_MS", "")
+        monkeypatch.setenv("PGTUNER_LOCK_TIMEOUT_MS", "not-a-number")
+        opts = _build_pg_options()
+        # Fell back to safe defaults
+        assert "statement_timeout=30000" in opts
+        assert "idle_in_transaction_session_timeout=60000" in opts
+        assert "lock_timeout=5000" in opts
+        # Injection attempt was rejected
+        assert "log_statement" not in opts
