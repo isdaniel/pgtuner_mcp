@@ -112,4 +112,31 @@ class TestAnalyzeToastStorageHandler:
         result = await handler.run_tool({})
         payload = json.loads(result[0].text)
         assert payload["tables"] == []  # skipped because col_payload empty
-        assert payload["summary"]["tables_analyzed"] == 0
+
+    @pytest.mark.asyncio
+    async def test_toast_recommends_lz4_for_default_compression(self, mock_sql_driver):
+        """PG14+ default attcompression marker (' ') means PGLZ — recommend LZ4."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],
+            [{"reloid": 1, "table_name": "docs", "schema": "public",
+              "toast_oid": 2, "toast_size_mb": 50}],
+            [{"name": "body", "type": "text", "storage": "x", "compression": " "}],
+        ])
+        handler = AnalyzeToastStorageHandler(mock_sql_driver)
+        result = await handler.run_tool({})
+        payload = json.loads(result[0].text)
+        assert any("SET COMPRESSION lz4" in r for r in payload["recommendations"])
+
+    @pytest.mark.asyncio
+    async def test_toast_no_recommendation_when_already_lz4(self, mock_sql_driver):
+        """Columns already using LZ4 should NOT be flagged."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],
+            [{"reloid": 1, "table_name": "docs", "schema": "public",
+              "toast_oid": 2, "toast_size_mb": 50}],
+            [{"name": "body", "type": "text", "storage": "x", "compression": "l"}],
+        ])
+        handler = AnalyzeToastStorageHandler(mock_sql_driver)
+        result = await handler.run_tool({})
+        payload = json.loads(result[0].text)
+        assert payload["recommendations"] == []

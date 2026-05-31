@@ -207,8 +207,12 @@ class AnalyzeToastStorageHandler(ToolHandler):
                         c["compression"] or " ", str(c["compression"])
                     )
                     rec = None
+                    # PG14+ default compression marker (' ' / '') maps to 'default'
+                    # which is PGLZ; flag any non-LZ4 EXTENDED column on a large
+                    # TOAST table as a candidate for LZ4 conversion.
                     if (pg_version >= 14 and storage == "EXTENDED"
-                            and compression == "pglz" and (t.get("toast_size_mb") or 0) > 10):
+                            and compression != "lz4"
+                            and (t.get("toast_size_mb") or 0) > 10):
                         rec = (f"Consider ALTER TABLE {t['schema']}.{t['table_name']} "
                                f"ALTER COLUMN {c['name']} SET COMPRESSION lz4;")
                         recs.append(rec)
