@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+from .conftest import parse_tool_json
+
 pytestmark = pytest.mark.integration
 
 
@@ -10,7 +12,7 @@ async def test_get_slow_queries(live_driver):
     from pgtuner_mcp.tools.tools_performance import GetSlowQueriesToolHandler
     h = GetSlowQueriesToolHandler(live_driver)
     result = await h.run_tool({"limit": 5, "min_calls": 1})
-    json.loads(result[0].text)  # parses
+    parse_tool_json(result)  # parses
 
 
 @pytest.mark.asyncio
@@ -18,7 +20,7 @@ async def test_analyze_query(live_driver):
     from pgtuner_mcp.tools.tools_performance import AnalyzeQueryToolHandler
     h = AnalyzeQueryToolHandler(live_driver)
     result = await h.run_tool({"query": "SELECT id FROM users LIMIT 1", "analyze": True})
-    json.loads(result[0].text)
+    parse_tool_json(result)
 
 
 @pytest.mark.asyncio
@@ -36,4 +38,4 @@ async def test_analyze_disk_io_patterns(live_driver):
     from pgtuner_mcp.tools.tools_performance import DiskIOPatternToolHandler
     h = DiskIOPatternToolHandler(live_driver)
     result = await h.run_tool({"analysis_type": "all"})
-    json.loads(result[0].text)
+    parse_tool_json(result)

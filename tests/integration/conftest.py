@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import pathlib
 
@@ -12,6 +13,19 @@ from pgtuner_mcp.services.sql_driver import DbConnPool, SqlDriver
 
 _VERSION_PORT = {"14": "5414", "15": "5415", "16": "5416", "17": "5417"}
 _SEED_DIR = pathlib.Path(__file__).parent / "seed"
+
+
+def parse_tool_json(result):
+    """Parse a tool's TextContent result as JSON.
+
+    Surfaces a clear failure if the tool returned an ``Error: ...`` string
+    (via ``format_error``) instead of structured JSON, so the real SQL error
+    appears in the test failure instead of a confusing JSONDecodeError.
+    """
+    text = result[0].text
+    if text.lstrip().startswith("Error:"):
+        raise AssertionError(f"Tool returned error response:\n{text}")
+    return json.loads(text)
 
 
 def _database_uri() -> str:

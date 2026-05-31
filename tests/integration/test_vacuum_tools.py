@@ -1,6 +1,6 @@
-import json
-
 import pytest
+
+from .conftest import parse_tool_json
 
 pytestmark = pytest.mark.integration
 
@@ -12,4 +12,4 @@ async def test_monitor_vacuum_progress(live_driver, action):
     from pgtuner_mcp.tools.tools_vacuum import VacuumProgressToolHandler
     h = VacuumProgressToolHandler(live_driver)
     result = await h.run_tool({"action": action, "schema_name": "public"})
-    json.loads(result[0].text)
+    parse_tool_json(result)

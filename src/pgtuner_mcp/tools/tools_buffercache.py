@@ -83,7 +83,8 @@ class AnalyzeBufferCacheHandler(ToolHandler):
                     FROM pg_buffercache b
                     JOIN pg_class c ON b.relfilenode = pg_relation_filenode(c.oid)
                     JOIN pg_namespace n ON n.oid = c.relnamespace
-                    WHERE n.nspname = %s
+                    WHERE b.reldatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
+                      AND n.nspname = %s
                       AND c.relkind IN {rk_filter}
                       AND n.nspname NOT IN ('pg_catalog', 'information_schema', 'pg_toast')
                     GROUP BY c.relname, n.nspname, c.relkind
@@ -181,11 +182,16 @@ class AnalyzeToastStorageHandler(ToolHandler):
             results: list[dict[str, Any]] = []
             recs: list[str] = []
             for t in tables:
-                cols_sql = """
+                # attcompression was added in PG14; older versions report NULL.
+                compression_col = (
+                    "a.attcompression AS compression" if pg_version >= 14
+                    else "NULL::\"char\" AS compression"
+                )
+                cols_sql = f"""
                     SELECT a.attname AS name,
                            pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
                            a.attstorage AS storage,
-                           a.attcompression AS compression
+                           {compression_col}
                     FROM pg_attribute a
                     JOIN pg_type ty ON ty.oid = a.atttypid
                     WHERE a.attrelid = %s

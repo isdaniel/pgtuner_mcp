@@ -2,6 +2,8 @@ import json
 
 import pytest
 
+from .conftest import parse_tool_json
+
 pytestmark = pytest.mark.integration
 
 
@@ -12,7 +14,7 @@ async def test_get_index_recommendations(live_driver):
     advisor = IndexAdvisor(live_driver)
     h = IndexAdvisorToolHandler(advisor)
     result = await h.run_tool({"max_recommendations": 3, "min_improvement_percent": 5})
-    json.loads(result[0].text)
+    parse_tool_json(result)
 
 
 @pytest.mark.asyncio
@@ -24,7 +26,7 @@ async def test_explain_with_indexes(live_driver):
         "query": "SELECT * FROM orders WHERE user_id = 1",
         "hypothetical_indexes": [{"table": "orders", "columns": ["user_id"]}],
     })
-    json.loads(result[0].text)
+    parse_tool_json(result)
 
 
 @pytest.mark.asyncio
@@ -33,7 +35,7 @@ async def test_manage_hypothetical_indexes(live_driver):
     from pgtuner_mcp.tools.tools_index import HypoPGToolHandler
     h = HypoPGToolHandler(HypoPGService(live_driver))
     result = await h.run_tool({"action": "reset"})
-    json.loads(result[0].text)
+    parse_tool_json(result)
 
 
 @pytest.mark.asyncio

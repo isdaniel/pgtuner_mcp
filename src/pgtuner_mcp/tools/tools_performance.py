@@ -9,7 +9,7 @@ from typing import Any
 from mcp.types import TextContent, Tool
 
 from ..services import SqlDriver, get_user_filter
-from ..services.sql_driver import check_extension_installed
+from ..services.sql_driver import check_extension_installed, get_postgres_version
 from .toolhandler import ToolHandler
 
 
@@ -1062,25 +1062,49 @@ Use this to identify:
 
     async def _analyze_checkpoint_io(self, output: dict[str, Any]) -> None:
         """Analyze checkpoint and background writer I/O."""
-        query = """
-            SELECT
-                checkpoints_timed,
-                checkpoints_req,
-                checkpoint_write_time,
-                checkpoint_sync_time,
-                buffers_checkpoint,
-                buffers_clean,
-                buffers_backend,
-                buffers_backend_fsync,
-                buffers_alloc,
-                CASE
-                    WHEN buffers_checkpoint + buffers_clean + buffers_backend > 0
-                    THEN ROUND(100.0 * buffers_backend / (buffers_checkpoint + buffers_clean + buffers_backend), 2)
-                    ELSE 0
-                END as backend_write_ratio,
-                stats_reset
-            FROM pg_stat_bgwriter
-        """
+        pg_version = await get_postgres_version(self.sql_driver)
+        if pg_version >= 17:
+            # PG17: checkpoint stats moved to pg_stat_checkpointer with renamed
+            # columns; buffers_backend / buffers_backend_fsync were removed
+            # (use pg_stat_io). Alias to old names so downstream logic stays
+            # identical.
+            query = """
+                SELECT
+                    c.num_timed AS checkpoints_timed,
+                    c.num_requested AS checkpoints_req,
+                    c.write_time AS checkpoint_write_time,
+                    c.sync_time AS checkpoint_sync_time,
+                    c.buffers_written AS buffers_checkpoint,
+                    b.buffers_clean,
+                    0 AS buffers_backend,
+                    0 AS buffers_backend_fsync,
+                    b.buffers_alloc,
+                    CASE WHEN c.buffers_written + b.buffers_clean > 0
+                         THEN ROUND(100.0 * 0 / (c.buffers_written + b.buffers_clean), 2)
+                         ELSE 0 END as backend_write_ratio,
+                    c.stats_reset
+                FROM pg_stat_checkpointer c, pg_stat_bgwriter b
+            """
+        else:
+            query = """
+                SELECT
+                    checkpoints_timed,
+                    checkpoints_req,
+                    checkpoint_write_time,
+                    checkpoint_sync_time,
+                    buffers_checkpoint,
+                    buffers_clean,
+                    buffers_backend,
+                    buffers_backend_fsync,
+                    buffers_alloc,
+                    CASE
+                        WHEN buffers_checkpoint + buffers_clean + buffers_backend > 0
+                        THEN ROUND(100.0 * buffers_backend / (buffers_checkpoint + buffers_clean + buffers_backend), 2)
+                        ELSE 0
+                    END as backend_write_ratio,
+                    stats_reset
+                FROM pg_stat_bgwriter
+            """
         result = await self.sql_driver.execute_query(query)
 
         if result:
