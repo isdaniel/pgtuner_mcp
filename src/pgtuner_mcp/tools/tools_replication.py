@@ -93,7 +93,12 @@ class CheckReplicationHealthHandler(ToolHandler):
                     s.slot_type,
                     s.active,
                     s.restart_lsn::text AS restart_lsn,
-                    pg_wal_lsn_diff(pg_current_wal_lsn(), s.restart_lsn) AS wal_retained_bytes,
+                    pg_wal_lsn_diff(
+                        CASE WHEN pg_is_in_recovery()
+                             THEN pg_last_wal_replay_lsn()
+                             ELSE pg_current_wal_lsn() END,
+                        s.restart_lsn
+                    ) AS wal_retained_bytes,
                     s.two_phase
                 FROM pg_replication_slots s
             """
@@ -104,7 +109,12 @@ class CheckReplicationHealthHandler(ToolHandler):
                     slot_type,
                     active,
                     restart_lsn::text AS restart_lsn,
-                    pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) AS wal_retained_bytes,
+                    pg_wal_lsn_diff(
+                        CASE WHEN pg_is_in_recovery()
+                             THEN pg_last_wal_replay_lsn()
+                             ELSE pg_current_wal_lsn() END,
+                        restart_lsn
+                    ) AS wal_retained_bytes,
                     false AS two_phase
                 FROM pg_replication_slots
             """

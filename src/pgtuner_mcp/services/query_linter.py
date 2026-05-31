@@ -111,11 +111,26 @@ class SelectStarRule(Rule):
 
 class ImplicitCastRule(Rule):
     rule_id = "implicit-cast"
-    severity = Severity.WARNING
+    # INFO: without column-type info we cannot tell text-vs-text (safe) from
+    # timestamp-vs-text (suspect). Users must opt in via severity_threshold=info.
+    severity = Severity.INFO
+
+    # LIKE/ILIKE are text-only operators; flagging them as implicit-cast is
+    # always wrong and overlaps with NonSargableLikeRule.
+    _LIKE_OPS = frozenset({
+        "~~", "LIKE", "~~*", "ILIKE",
+        "!~~", "NOT LIKE", "!~~*", "NOT ILIKE",
+    })
 
     def check(self, root: Any, sql: str) -> list[Finding]:
         for n in _walk(root):
             if type(n).__name__ != "A_Expr":
+                continue
+            op_nodes = getattr(n, "name", None) or ()
+            op_name = "".join(
+                (getattr(x, "sval", "") or "") for x in op_nodes
+            ).upper()
+            if op_name in self._LIKE_OPS:
                 continue
             lexpr, rexpr = getattr(n, "lexpr", None), getattr(n, "rexpr", None)
             for left, right in ((lexpr, rexpr), (rexpr, lexpr)):

@@ -182,3 +182,20 @@ class TestCheckReplicationHealthHandler:
         payload = json.loads(result[0].text)
         assert len(payload["slots"]) == 1
         assert payload["issues"] == []
+
+    @pytest.mark.asyncio
+    async def test_slots_sql_is_standby_safe(self, mock_sql_driver):
+        """The slots query must use pg_is_in_recovery() + pg_last_wal_replay_lsn()
+        so it doesn't crash on standby/replica nodes (where pg_current_wal_lsn()
+        raises 'recovery is in progress')."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],
+            [],
+        ])
+        handler = CheckReplicationHealthHandler(mock_sql_driver)
+        await handler.run_tool({"action": "slots"})
+        # Second execute_query call is the slots SQL
+        slots_sql = mock_sql_driver.execute_query.call_args_list[1].args[0]
+        assert "pg_is_in_recovery()" in slots_sql
+        assert "pg_last_wal_replay_lsn()" in slots_sql
+        assert "pg_current_wal_lsn()" in slots_sql  # still used in the ELSE branch

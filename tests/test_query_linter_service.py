@@ -155,3 +155,17 @@ class TestRulesExtended:
             "SELECT id FROM users WHERE lower(coalesce(email, '')) = 'x@y.z'"
         )
         assert "function-on-indexed-col" in self._ids(f)
+
+    def test_implicit_cast_skips_like(self):
+        """LIKE/ILIKE are text-only operators — implicit-cast must not fire."""
+        f = QueryLinter().lint("SELECT id FROM users WHERE email LIKE '%example%'")
+        assert "implicit-cast" not in self._ids(f)
+
+    def test_implicit_cast_filtered_at_warning_threshold(self):
+        """implicit-cast is INFO severity; the workload-default WARNING
+        threshold must filter it out so 'email = ''x''' patterns don't spam."""
+        f = QueryLinter().lint(
+            "SELECT id FROM users WHERE created_at = '2026-01-01'",
+            threshold=Severity.WARNING,
+        )
+        assert "implicit-cast" not in self._ids(f)
