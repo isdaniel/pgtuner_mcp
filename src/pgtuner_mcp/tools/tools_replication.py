@@ -209,5 +209,6 @@ class CheckReplicationHealthHandler(ToolHandler):
                     f"Prepared xact '{r['gid']}' is {int(age)}s old — likely orphan"
                 )
                 result["recommendations"].append(
+                    f"Connect to database '{r['database']}' and run: "
                     f"ROLLBACK PREPARED '{r['gid']}'; if confirmed stale"
                 )

@@ -79,7 +79,10 @@ class TestCheckReplicationHealthHandler:
         result = await handler.run_tool({"action": "prepared_xacts"})
         payload = json.loads(result[0].text)
         assert any("stale_gid" in i for i in payload["issues"])
-        assert any("ROLLBACK PREPARED" in r for r in payload["recommendations"])
+        # Recommendation must name the source database (pg_prepared_xacts is
+        # cluster-wide but ROLLBACK PREPARED is connection-database-scoped).
+        recs = payload["recommendations"]
+        assert any("ROLLBACK PREPARED" in r and "'db'" in r for r in recs)
 
     @pytest.mark.asyncio
     async def test_returns_error_on_query_failure(self, mock_sql_driver):

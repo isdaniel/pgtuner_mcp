@@ -81,7 +81,12 @@ class AnalyzeBufferCacheHandler(ToolHandler):
                         COUNT(*) FILTER (WHERE b.isdirty) AS dirty_pages,
                         AVG(b.usagecount)::numeric(10,2) AS avg_usagecount
                     FROM pg_buffercache b
-                    JOIN pg_class c ON b.relfilenode = pg_relation_filenode(c.oid)
+                    -- Direct column join (not pg_relation_filenode(c.oid)) avoids
+                    -- a per-row function call that defeats the index on
+                    -- pg_class(relfilenode). Safe here because the schema filter
+                    -- below excludes pg_catalog/information_schema/pg_toast —
+                    -- the only relations whose relfilenode is 0 (mapped catalogs).
+                    JOIN pg_class c ON b.relfilenode = c.relfilenode
                     JOIN pg_namespace n ON n.oid = c.relnamespace
                     WHERE b.reldatabase = (SELECT oid FROM pg_database WHERE datname = current_database())
                       AND n.nspname = %s
@@ -221,8 +226,10 @@ class AnalyzeToastStorageHandler(ToolHandler):
                     if (pg_version >= 14 and storage == "EXTENDED"
                             and compression != "lz4"
                             and (t.get("toast_size_mb") or 0) > 10):
-                        rec = (f"Consider ALTER TABLE {t['schema']}.{t['table_name']} "
-                               f"ALTER COLUMN {c['name']} SET COMPRESSION lz4;")
+                        rec = (
+                            f'Consider ALTER TABLE "{t["schema"]}"."{t["table_name"]}" '
+                            f'ALTER COLUMN "{c["name"]}" SET COMPRESSION lz4;'
+                        )
                         recs.append(rec)
                     col_payload.append({
                         "name": c["name"], "type": c["type"],

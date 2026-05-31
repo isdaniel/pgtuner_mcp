@@ -140,3 +140,21 @@ class TestAnalyzeToastStorageHandler:
         result = await handler.run_tool({})
         payload = json.loads(result[0].text)
         assert payload["recommendations"] == []
+
+    @pytest.mark.asyncio
+    async def test_toast_recommendation_quotes_identifiers(self, mock_sql_driver):
+        """ALTER TABLE recommendation must quote schema/table/column so it works
+        on identifiers with uppercase, spaces, or reserved words."""
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"server_version": "16.2"}],
+            [{"reloid": 1, "table_name": "User Docs", "schema": "MySchema",
+              "toast_oid": 2, "toast_size_mb": 50}],
+            [{"name": "Order", "type": "text", "storage": "x", "compression": "p"}],
+        ])
+        handler = AnalyzeToastStorageHandler(mock_sql_driver)
+        result = await handler.run_tool({})
+        payload = json.loads(result[0].text)
+        rec = payload["recommendations"][0]
+        assert '"MySchema"."User Docs"' in rec
+        assert '"Order"' in rec
+        assert "SET COMPRESSION lz4" in rec
