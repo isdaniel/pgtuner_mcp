@@ -43,6 +43,12 @@ asyncio_mode = "auto"
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "integration: requires a live PostgreSQL (skip with -m 'not integration')",
+    "pg14_plus: skip if PG < 14",
+    "pg16_plus: skip if PG < 16",
+]
+addopts = "-m 'not integration'"
 
 [tool.ruff]
 line-length = 120

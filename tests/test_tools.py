@@ -80,9 +80,8 @@ class TestGetSlowQueriesToolHandler:
     @pytest.mark.asyncio
     async def test_run_tool_no_extension(self, mock_sql_driver):
         """Test behavior when pg_stat_statements is not available."""
-        mock_sql_driver.execute_query = AsyncMock(
-            return_value=[{"available": False}]
-        )
+        # check_extension_installed returns False when the SELECT yields no rows
+        mock_sql_driver.execute_query = AsyncMock(return_value=[])
 
         handler = GetSlowQueriesToolHandler(mock_sql_driver)
         result = await handler.run_tool({})
@@ -95,7 +94,7 @@ class TestGetSlowQueriesToolHandler:
     async def test_run_tool_with_results(self, mock_sql_driver):
         """Test behavior with slow queries returned."""
         mock_sql_driver.execute_query = AsyncMock(side_effect=[
-            [{"available": True}],  # Extension check
+            [{"exists": True}],  # Extension check (check_extension_installed)
             [  # Slow queries
                 {
                     "queryid": 123,

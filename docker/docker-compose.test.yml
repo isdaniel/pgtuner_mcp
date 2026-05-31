@@ -1,0 +1,45 @@
+services:
+  pg14:
+    build: { context: ., dockerfile: Dockerfile.pg, args: { PG_VERSION: "14" } }
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: pgtuner_test
+    ports: ["5414:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  pg15:
+    build: { context: ., dockerfile: Dockerfile.pg, args: { PG_VERSION: "15" } }
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: pgtuner_test
+    ports: ["5415:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  pg16:
+    build: { context: ., dockerfile: Dockerfile.pg, args: { PG_VERSION: "16" } }
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: pgtuner_test
+    ports: ["5416:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  pg17:
+    build: { context: ., dockerfile: Dockerfile.pg, args: { PG_VERSION: "17" } }
+    environment:
+      POSTGRES_PASSWORD: test
+      POSTGRES_DB: pgtuner_test
+    ports: ["5417:5432"]
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

@@ -9,7 +9,85 @@ from typing import Any
 from mcp.types import TextContent, Tool
 
 from ..services import SqlDriver, get_user_filter
+from ..services.sql_driver import check_extension_installed
 from .toolhandler import ToolHandler
+
+
+# Whitelist mapping public order_by names to actual pg_stat_statements columns
+_SLOW_QUERY_ORDER_MAP = {
+    "mean_time": "mean_exec_time",
+    "calls": "calls",
+    "rows": "rows",
+}
+
+
+def build_slow_query_sql(
+    min_calls: int,
+    min_mean_time_ms: float | None,
+    limit: int,
+    order_by: str,
+    statements_filter: str,
+) -> tuple[str, list[Any]]:
+    """Build the SQL + params for slow-query selection from pg_stat_statements.
+
+    Includes system-schema text filters (pg_catalog, information_schema,
+    pg_toast, pg_stat_statements) so meta-queries are excluded.
+
+    Args:
+        min_calls: Minimum number of calls.
+        min_mean_time_ms: Minimum mean execution time in ms (None => no filter).
+        limit: Row cap.
+        order_by: One of the keys in ``_SLOW_QUERY_ORDER_MAP``; falls back
+            to ``mean_time`` if invalid (SQL-injection-safe whitelist).
+        statements_filter: Pre-built clause from ``UserFilter.get_statements_filter()``
+            (already begins with ``AND `` or is empty).
+
+    Returns:
+        Tuple of (SQL string, parameter list).
+    """
+    if order_by not in _SLOW_QUERY_ORDER_MAP:
+        order_by = "mean_time"
+    order_column = _SLOW_QUERY_ORDER_MAP[order_by]
+
+    time_clause = ""
+    params: list[Any] = [min_calls]
+    if min_mean_time_ms is not None:
+        time_clause = "AND mean_exec_time >= %s"
+        params.append(float(min_mean_time_ms))
+    params.append(limit)
+
+    sql = f"""
+        SELECT
+            queryid,
+            LEFT(query, 500) as query_text,
+            calls,
+            ROUND(mean_exec_time::numeric, 2) as mean_time_ms,
+            ROUND(min_exec_time::numeric, 2) as min_time_ms,
+            ROUND(max_exec_time::numeric, 2) as max_time_ms,
+            ROUND(stddev_exec_time::numeric, 2) as stddev_time_ms,
+            rows,
+            shared_blks_hit,
+            shared_blks_read,
+            CASE
+                WHEN shared_blks_hit + shared_blks_read > 0
+                THEN ROUND(100.0 * shared_blks_hit / (shared_blks_hit + shared_blks_read), 2)
+                ELSE 100
+            END as cache_hit_ratio,
+            temp_blks_read,
+            temp_blks_written
+        FROM pg_stat_statements
+        WHERE calls >= %s
+          {time_clause}
+          AND query NOT LIKE '%%pg_stat_statements%%'
+          AND query NOT LIKE '%%pg_catalog%%'
+          AND query NOT LIKE '%%information_schema%%'
+          AND query NOT LIKE '%%pg_toast%%'
+          {statements_filter}
+        ORDER BY {order_column} DESC
+        LIMIT %s
+    """
+    return sql, params
+
 
 class GetSlowQueriesToolHandler(ToolHandler):
     """Tool handler for retrieving slow queries from pg_stat_statements."""
@@ -83,26 +161,8 @@ The results include:
             min_mean_time_ms = arguments.get("min_mean_time_ms", 0)
             order_by = arguments.get("order_by", "mean_time")
 
-            # Map order_by to actual column names (whitelist for SQL injection protection)
-            order_map = {
-                "mean_time": "mean_exec_time",
-                "calls": "calls",
-                "rows": "rows"
-            }
-            # Validate order_by against whitelist to prevent SQL injection
-            if order_by not in order_map:
-                order_by = "mean_time"
-            order_column = order_map[order_by]
-
-            # Check if pg_stat_statements is available
-            check_query = """
-                SELECT EXISTS (
-                    SELECT 1 FROM pg_extension WHERE extname = 'pg_stat_statements'
-                ) as available
-            """
-            check_result = await self.sql_driver.execute_query(check_query)
-
-            if not check_result or not check_result[0].get("available"):
+            # Check if pg_stat_statements is available (shared helper)
+            if not await check_extension_installed(self.sql_driver, "pg_stat_statements"):
                 return self.format_result(
                     "Error: pg_stat_statements extension is not installed.\n"
                     "Install it with: CREATE EXTENSION pg_stat_statements;\n"
@@ -113,44 +173,16 @@ The results include:
             user_filter = get_user_filter()
             statements_filter = user_filter.get_statements_filter()
 
-            # Query pg_stat_statements for slow queries
-            # Using pg_stat_statements columns available in PostgreSQL 13+
-            # Excludes system catalog queries to focus on user/application queries
-            query = f"""
-                SELECT
-                    queryid,
-                    LEFT(query, 500) as query_text,
-                    calls,
-                    ROUND(mean_exec_time::numeric, 2) as mean_time_ms,
-                    ROUND(min_exec_time::numeric, 2) as min_time_ms,
-                    ROUND(max_exec_time::numeric, 2) as max_time_ms,
-                    ROUND(stddev_exec_time::numeric, 2) as stddev_time_ms,
-                    rows,
-                    shared_blks_hit,
-                    shared_blks_read,
-                    CASE
-                        WHEN shared_blks_hit + shared_blks_read > 0
-                        THEN ROUND(100.0 * shared_blks_hit / (shared_blks_hit + shared_blks_read), 2)
-                        ELSE 100
-                    END as cache_hit_ratio,
-                    temp_blks_read,
-                    temp_blks_written
-                FROM pg_stat_statements
-                WHERE calls >= %s
-                  AND mean_exec_time >= %s
-                  AND query NOT LIKE '%%pg_stat_statements%%'
-                  AND query NOT LIKE '%%pg_catalog%%'
-                  AND query NOT LIKE '%%information_schema%%'
-                  AND query NOT LIKE '%%pg_toast%%'
-                  {statements_filter}
-                ORDER BY {order_column} DESC
-                LIMIT %s
-            """
-
-            results = await self.sql_driver.execute_query(
-                query,
-                [min_calls, min_mean_time_ms, limit]
+            # Build the slow-query SQL via shared helper (also used by lint_workload)
+            query, params = build_slow_query_sql(
+                min_calls=min_calls,
+                min_mean_time_ms=min_mean_time_ms,
+                limit=limit,
+                order_by=order_by,
+                statements_filter=statements_filter,
             )
+
+            results = await self.sql_driver.execute_query(query, params)
 
             if not results:
                 return self.format_result(

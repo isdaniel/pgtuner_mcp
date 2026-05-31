@@ -5,6 +5,8 @@ SQL Driver for PostgreSQL connections using psycopg connection pool.
 from __future__ import annotations
 
 import logging
+import os
+import re
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -41,6 +43,33 @@ def obfuscate_password(connection_string: str | None) -> str | None:
         return "****"
 
 
+def _build_pg_options() -> str:
+    """Build the Postgres `-c` options string from env vars."""
+    stmt = os.environ.get("PGTUNER_STATEMENT_TIMEOUT_MS", "30000")
+    idle = os.environ.get("PGTUNER_IDLE_TXN_TIMEOUT_MS", "60000")
+    lock = os.environ.get("PGTUNER_LOCK_TIMEOUT_MS", "5000")
+    return (
+        f"-c statement_timeout={stmt} "
+        f"-c idle_in_transaction_session_timeout={idle} "
+        f"-c lock_timeout={lock}"
+    )
+
+
+def scrub_connection_uris(text: str | None) -> str | None:
+    """Replace any embedded connection URI password with `****`.
+
+    Unlike obfuscate_password(), this handles strings that contain a URI
+    embedded in surrounding text (error messages, log lines, etc.).
+    """
+    if not text:
+        return text
+    return re.sub(
+        r"postgres(?:ql)?://[^\s]+",
+        lambda m: obfuscate_password(m.group(0)) or "****",
+        text,
+    )
+
+
 class DbConnPool:
     """Database connection manager using psycopg's connection pool."""
 
@@ -55,6 +84,10 @@ class DbConnPool:
         self.pool: AsyncConnectionPool | None = None
         self._is_valid = False
         self._last_error: str | None = None
+
+    def _set_last_error(self, message: str | None) -> None:
+        """Store an error message, scrubbing any embedded connection-string password."""
+        self._last_error = scrub_connection_uris(message)
 
     async def connect(self, connection_url: str | None = None) -> AsyncConnectionPool:
         """
@@ -91,6 +124,7 @@ class DbConnPool:
                 min_size=1,
                 max_size=5,
                 open=False,  # Don't connect immediately
+                kwargs={"options": _build_pg_options()},
             )
 
             # Open the pool explicitly
@@ -108,7 +142,7 @@ class DbConnPool:
 
         except Exception as e:
             self._is_valid = False
-            self._last_error = str(e)
+            self._set_last_error(str(e))
 
             # Clean up failed pool
             await self.close()
@@ -212,7 +246,7 @@ class SqlDriver:
                 )
         except (ConnectionError, OSError, TimeoutError, OperationalError, PoolTimeout) as e:
             self.pool._is_valid = False
-            self.pool._last_error = str(e)
+            self.pool._set_last_error(str(e))
             logger.error(f"Connection error, marking pool as invalid: {e}")
             raise
         except Exception as e:

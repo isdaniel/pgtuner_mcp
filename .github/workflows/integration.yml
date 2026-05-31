@@ -1,0 +1,47 @@
+name: integration
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  integration:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pg_version: ["14", "15", "16", "17"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Build PG test image
+        run: |
+          cd docker
+          docker build --build-arg PG_VERSION=${{ matrix.pg_version }} \
+            -t pgtuner-test-pg:${{ matrix.pg_version }} -f Dockerfile.pg .
+
+      - name: Start PG
+        run: |
+          docker run -d --name pgtest \
+            -e POSTGRES_PASSWORD=test -e POSTGRES_DB=pgtuner_test \
+            -p 5432:5432 pgtuner-test-pg:${{ matrix.pg_version }}
+          for i in {1..30}; do
+            docker exec pgtest pg_isready -U postgres && break
+            sleep 2
+          done
+
+      - name: Install package + dev deps
+        run: |
+          pip install -e ".[dev,sse]"
+
+      - name: Run integration tests
+        env:
+          PGTUNER_TEST_PG_VERSION: ${{ matrix.pg_version }}
+          PGTUNER_TEST_PG_HOST: localhost
+          PGTUNER_TEST_PG_PORT_OVERRIDE: "5432"
+          PGTUNER_STATEMENT_TIMEOUT_MS: "2000"
+        run: |
+          pytest -m integration -v
