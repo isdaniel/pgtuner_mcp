@@ -110,3 +110,26 @@ class TestLintWorkloadHandler:
         result = await h.run_tool({})
         assert "Error" in result[0].text
         assert "db down" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_lint_workload_handles_long_query_text(self, mock_sql_driver):
+        """build_slow_query_sql must return the FULL query text so the linter
+        can parse it. SQL-side truncation (LEFT(query, 500)) would corrupt
+        the AST for any query longer than 500 chars and produce parse-error."""
+        long_query = (
+            "SELECT * FROM users WHERE "
+            + " OR ".join(f"email = 'user{i:05d}@example.com'" for i in range(40))
+        )
+        assert len(long_query) > 500
+        mock_sql_driver.execute_query = AsyncMock(side_effect=[
+            [{"exists": True}],
+            [{"query_text": long_query, "calls": 100, "mean_time_ms": 10.0,
+              "queryid": "long_q"}],
+        ])
+        h = LintWorkloadHandler(mock_sql_driver)
+        result = await h.run_tool({"min_calls": 0, "severity_threshold": "info"})
+        payload = json.loads(result[0].text)
+        # Linter parsed the full query and produced findings; no parse-error.
+        all_rules = {f["rule"] for r in payload["ranked_findings"] for f in r["findings"]}
+        assert "parse-error" not in all_rules
+        assert "select-star" in all_rules

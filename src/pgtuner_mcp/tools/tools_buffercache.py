@@ -203,9 +203,17 @@ class AnalyzeToastStorageHandler(ToolHandler):
                 for c in cols:
                     storage = {"p": "PLAIN", "e": "EXTERNAL",
                                "m": "MAIN", "x": "EXTENDED"}.get(c["storage"], c["storage"])
-                    compression = {"p": "pglz", "l": "lz4", " ": "default", "": "default"}.get(
-                        c["compression"] or " ", str(c["compression"])
-                    )
+                    # `attcompression` is 'p' (pglz), 'l' (lz4), or a default
+                    # marker that varies by driver/version: ' ', '', '\x00', None.
+                    # Map everything else to 'default' rather than echoing raw
+                    # control characters.
+                    raw_comp = c.get("compression")
+                    if raw_comp == "p":
+                        compression = "pglz"
+                    elif raw_comp == "l":
+                        compression = "lz4"
+                    else:
+                        compression = "default"
                     rec = None
                     # PG14+ default compression marker (' ' / '') maps to 'default'
                     # which is PGLZ; flag any non-LZ4 EXTENDED column on a large

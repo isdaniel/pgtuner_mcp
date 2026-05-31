@@ -164,13 +164,16 @@ class OrOfEqualsRule(Rule):
                 continue
             args = getattr(n, "args", None) or ()
             eq_cols: list[str] = []
+            all_args_match = True
             for a in args:
                 if type(a).__name__ != "A_Expr":
+                    all_args_match = False
                     continue
                 # Only consider equality
                 name = getattr(a, "name", None) or ()
                 op_names = [getattr(x, "sval", "") or "" for x in name]
                 if "=" not in op_names:
+                    all_args_match = False
                     continue
                 lexpr = getattr(a, "lexpr", None)
                 rexpr = getattr(a, "rexpr", None)
@@ -178,7 +181,13 @@ class OrOfEqualsRule(Rule):
                     eq_cols.append(_col_name(lexpr))
                 elif rexpr is not None and type(rexpr).__name__ == "ColumnRef":
                     eq_cols.append(_col_name(rexpr))
-            if len(eq_cols) >= 2 and len(set(eq_cols)) == 1 and eq_cols[0]:
+                else:
+                    all_args_match = False
+            # Only suggest IN(...) when EVERY arg in the OR-chain is `col = const`
+            # on the same column — otherwise the rewrite would silently drop the
+            # other predicates.
+            if (all_args_match and len(eq_cols) >= 2
+                    and len(set(eq_cols)) == 1 and eq_cols[0]):
                 return [Finding(
                     self.rule_id, self.severity,
                     f"OR-chain on '{eq_cols[0]}' could be rewritten as IN(...)",

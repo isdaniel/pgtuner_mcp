@@ -169,3 +169,12 @@ class TestRulesExtended:
             threshold=Severity.WARNING,
         )
         assert "implicit-cast" not in self._ids(f)
+
+    def test_or_of_equals_negative_mixed_conditions(self):
+        """The OR-chain `col = 1 OR col = 2 OR other_col > 3` must NOT
+        suggest `col IN (1, 2)` — the rewrite would silently drop the
+        other_col predicate."""
+        f = QueryLinter().lint(
+            "SELECT id FROM t WHERE col = 1 OR col = 2 OR other_col > 3"
+        )
+        assert "or-of-equals" not in self._ids(f)

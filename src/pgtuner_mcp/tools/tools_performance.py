@@ -59,7 +59,7 @@ def build_slow_query_sql(
     sql = f"""
         SELECT
             queryid,
-            LEFT(query, 500) as query_text,
+            query as query_text,
             calls,
             ROUND(mean_exec_time::numeric, 2) as mean_time_ms,
             ROUND(min_exec_time::numeric, 2) as min_time_ms,
@@ -192,6 +192,13 @@ The results include:
                     "- No queries exceed the minimum thresholds\n"
                     "- The database has low query activity"
                 )
+
+            # Truncate query text for display (full text is preserved at the
+            # SQL layer so the linter can parse it).
+            for r in results:
+                qt = r.get("query_text")
+                if isinstance(qt, str) and len(qt) > 500:
+                    r["query_text"] = qt[:500] + "..."
 
             # Format results
             output = {
