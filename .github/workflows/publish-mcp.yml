@@ -18,9 +18,8 @@ jobs:
 
     - name: Install mcp-publisher
       run: |
-        # Install mcp-publisher CLI
-        curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.3.10/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher && sudo mv mcp-publisher /usr/local/bin/
-        echo "$HOME/.local/bin" >> $GITHUB_PATH
+        # Install mcp-publisher CLI (v1.7.9+ uses the correct OIDC audience https://registry.modelcontextprotocol.io)
+        curl -L "https://github.com/modelcontextprotocol/registry/releases/download/v1.7.9/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/').tar.gz" | tar xz mcp-publisher && sudo mv mcp-publisher /usr/local/bin/
 
     - name: Authenticate with MCP Registry
       run: |
