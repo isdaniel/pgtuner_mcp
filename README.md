@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/isdaniel-pgtuner-mcp-badge.png)](https://mseep.ai/app/isdaniel-pgtuner-mcp)
+
 # PostgreSQL Performance Tuning MCP
 
 [![PyPI - Version](https://img.shields.io/pypi/v/pgtuner-mcp)](https://pypi.org/project/pgtuner-mcp/)
